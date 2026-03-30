@@ -18,7 +18,7 @@ No cloud. No subscription. No £150/hr accountant. Just Claude Code and a folder
 - **Alerts you on Telegram** — weekly summaries, deadline warnings at 90/30/7/1 days, and a "confirm to run" button at filing time
 - **Remembers everything** — all data lives in a local SQLite database that Claude can query in plain English
 
-Supports **UK Self Assessment** (full) and **US Federal Tax / Schedule C** (in progress). Detects your location and adapts automatically.
+Supports **every country in the world**. Pre-built tax adapters for 30+ countries. For anywhere else, Claude generates your country's tax adapter during setup using its knowledge of local tax law — verified and saved to your machine.
 
 ---
 
@@ -80,11 +80,23 @@ You will never pay an accountant £150/hr to sort receipts again.
 
 ## Tax Support
 
-| Country | Status | Forms covered |
-|---------|--------|---------------|
-| 🇬🇧 UK | Full | SA100, SA103F, CGT (Section 104), Class 2/4 NI |
-| 🇺🇸 US | In progress | 1040, Schedule C, Schedule D |
-| Other | Manual mode | Captures all data, manual tax calculation |
+Every country is supported via a `TaxAdapter` — a structured rules file that tells the system your country's tax brackets, filing deadlines, capital gains method, self-employment rules, and expense categories.
+
+**Pre-built adapters (reviewed, maintained):**
+
+| Region | Countries |
+|--------|-----------|
+| 🇬🇧 British Isles | United Kingdom, Ireland |
+| 🇺🇸 Americas | United States, Canada, Australia, New Zealand, Brazil, Mexico |
+| 🇩🇪 Europe | Germany, France, Netherlands, Spain, Italy, Portugal, Switzerland, Belgium, Austria, Sweden, Norway, Denmark, Finland, Poland, Czech Republic, Greece |
+| 🌏 Asia-Pacific | Singapore, Japan, India, South Africa |
+| 🇦🇪 Special | UAE, Cayman Islands (zero-income-tax configs) |
+
+**Every other country:**
+
+During setup, if your country doesn't have a pre-built adapter, Claude generates one on the fly using its knowledge of your country's tax law. The generated adapter is saved to your machine at `~/.ai-accountant/tax-adapters/[country].json`, clearly marked as AI-generated, and includes a prompt to verify the rates against your tax authority's current guidance.
+
+You can correct any values in the adapter file and the system will use your updated version immediately. Community-submitted adapters are welcomed via PR.
 
 ---
 
@@ -96,7 +108,12 @@ Everything runs locally. Your financial documents never leave your machine. Only
 
 ## Contributing
 
-PRs welcome. Priority areas: US tax engine, additional bank adapters (Barclays, HSBC, Chase), VAT support, additional exchange parsers.
+PRs welcome. The highest-value contributions are:
+
+- **Tax adapters** — submit a reviewed `tax-adapters/[country-code].json` for your country. Template at `src/tax-adapters/_template.json`.
+- **Bank adapters** — CSV column mappings for your bank. Currently supported: Monzo, Starling, Barclays, HSBC, Revolut, Chase US, CommBank AU. Add yours in `src/bank-parsers/`.
+- **Exchange parsers** — trade history CSV formats for new exchanges.
+- **VAT/GST support** — the adapter spec includes a `vatThreshold` field; the VAT calculation engine is the next major feature.
 
 ---
 

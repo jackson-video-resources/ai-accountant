@@ -54,17 +54,15 @@ Ask these questions one at a time. Wait for each answer before asking the next. 
 **Q1:** "What's your first name? (I'll use this in reports and Telegram messages)"
 → Store as `USER_NAME`
 
-**Q2:** "Which country are you in? This determines which tax system I'll set up.
-  1. United Kingdom (Self Assessment, CGT Section 104, HMRC rules)
-  2. United States (Schedule C, 1040, IRS rules)
-  3. Other (I'll set up a universal tracker — you'll need to map your own tax rules)"
-→ Store as `COUNTRY` (uk / us / other)
+**Q2:** "Which country are you in? Just type the country name — I support every country in the world.
 
-**Q3 (UK only):** "What's your UTR — Unique Taxpayer Reference? It's 10 digits on any letter from HMRC. Press Enter to skip for now."
-→ Store as `UTR` (optional)
+  For 30+ countries I have pre-built, reviewed tax adapters. For anywhere else, I'll generate your country's tax rules on the fly using my knowledge of local tax law and save them to your machine for you to verify.
 
-**Q3 (US only):** "What's your SSN or EIN for tax filing? Press Enter to skip for now."
-→ Store as `TAX_ID` (optional)
+  Examples: United Kingdom, Germany, Australia, Canada, India, Singapore, Brazil, UAE..."
+→ Store as `COUNTRY_INPUT` (free text). Normalise to ISO 3166-1 country name. Store ISO 3166-1 alpha-2 code as `COUNTRY_CODE` (e.g. "GB", "US", "DE", "AU").
+
+**Q3:** "What's your tax ID number? (e.g. UK UTR, US SSN/EIN, Australian TFN, German Steueridentifikationsnummer). Press Enter to skip for now."
+→ Store as `TAX_ID` (optional, label varies by country)
 
 **Q4:** "Do you have crypto or investment trading activity? (yes / no)"
 → Store as `HAS_CRYPTO`
@@ -93,12 +91,800 @@ Ask these questions one at a time. Wait for each answer before asking the next. 
 
 Confirm before building: "Perfect. Here's what I'm about to set up:
 - Name: [USER_NAME]
-- Tax system: [COUNTRY]
+- Country: [COUNTRY_INPUT] ([COUNTRY_CODE])
 - Crypto tracking: [yes/no]
 - Telegram: [connected/skipped]
 - Install location: [INSTALL_DIR]
 
 Building now..."
+
+---
+
+## Phase 2b: Tax Adapter Resolution
+
+Before building anything else, determine which tax adapter to use.
+
+**Check if a pre-built adapter exists** for `COUNTRY_CODE` by looking for it in the list below. Pre-built adapters are embedded directly in this prompt.
+
+### Pre-built Tax Adapters
+
+Each adapter follows this TypeScript interface:
+
+```typescript
+interface TaxAdapter {
+  countryCode: string;          // ISO 3166-1 alpha-2
+  countryName: string;
+  currency: string;             // ISO 4217
+  currencySymbol: string;
+  taxAuthority: string;
+  taxAuthorityUrl: string;
+  taxYear: {
+    type: 'calendar' | 'fiscal';
+    fiscalStartMonth?: number;  // 1-12, only for fiscal
+    fiscalStartDay?: number;
+    labelFormat: 'single' | 'split';  // "2024" vs "2024-25"
+  };
+  incomeTax: {
+    personalAllowance: number;
+    personalAllowanceTaperThreshold?: number;
+    personalAllowanceTaperRate?: number;
+    brackets: Array<{ min: number; max: number | null; rate: number; label?: string }>;
+  };
+  selfEmploymentLevy?: {
+    name: string;
+    description: string;
+    components: Array<{
+      name: string;
+      rate: number;
+      onIncomeAbove?: number;
+      onIncomeUpTo?: number;
+      flatAnnualAmount?: number;
+      flatAmountIfAboveThreshold?: number;
+    }>;
+  };
+  capitalGains?: {
+    annualExemption: number;
+    rates: Array<{ condition: string; rate: number }>;
+    cryptoMethod: 'pool_section104' | 'fifo' | 'lifo' | 'specific_id' | 'average_cost';
+    cryptoNotes?: string;
+    holdingPeriodForReducedRate?: number;  // days
+  };
+  vat?: {
+    standardRate: number;
+    registrationThreshold: number;
+    name: string;  // "VAT", "GST", "TVA", "MwSt" etc.
+  };
+  filingDeadlines: Array<{
+    name: string;
+    description: string;
+    month: number;
+    day: number;
+    alertDaysBefore: number[];
+  }>;
+  mainForms: string[];
+  tradingAllowance?: number;
+  pensionContributionRelief?: boolean;
+  notes?: string;
+  generatedByAI: boolean;
+  lastVerified: string;  // ISO date
+}
+```
+
+Write the adapter file to `~/.ai-accountant/tax-adapters/[COUNTRY_CODE].json`.
+
+---
+
+#### 🇬🇧 GB — United Kingdom
+
+```json
+{
+  "countryCode": "GB",
+  "countryName": "United Kingdom",
+  "currency": "GBP",
+  "currencySymbol": "£",
+  "taxAuthority": "HMRC",
+  "taxAuthorityUrl": "https://www.gov.uk/self-assessment-tax-returns",
+  "taxYear": { "type": "fiscal", "fiscalStartMonth": 4, "fiscalStartDay": 6, "labelFormat": "split" },
+  "incomeTax": {
+    "personalAllowance": 12570,
+    "personalAllowanceTaperThreshold": 100000,
+    "personalAllowanceTaperRate": 0.5,
+    "brackets": [
+      { "min": 0, "max": 12570, "rate": 0, "label": "Personal Allowance" },
+      { "min": 12570, "max": 50270, "rate": 0.20, "label": "Basic Rate" },
+      { "min": 50270, "max": 125140, "rate": 0.40, "label": "Higher Rate" },
+      { "min": 125140, "max": null, "rate": 0.45, "label": "Additional Rate" }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "National Insurance",
+    "description": "Class 2 and Class 4 NI contributions for self-employed",
+    "components": [
+      { "name": "Class 2", "flatAnnualAmount": 179, "flatAmountIfAboveThreshold": 12570 },
+      { "name": "Class 4 (lower)", "rate": 0.09, "onIncomeAbove": 12570, "onIncomeUpTo": 50270 },
+      { "name": "Class 4 (upper)", "rate": 0.02, "onIncomeAbove": 50270 }
+    ]
+  },
+  "capitalGains": {
+    "annualExemption": 3000,
+    "rates": [
+      { "condition": "basic rate taxpayer", "rate": 0.10 },
+      { "condition": "higher/additional rate taxpayer", "rate": 0.20 },
+      { "condition": "residential property (basic)", "rate": 0.18 },
+      { "condition": "residential property (higher)", "rate": 0.24 }
+    ],
+    "cryptoMethod": "pool_section104",
+    "cryptoNotes": "HMRC requires Section 104 pooling. Same-day rule and 30-day bed-and-breakfast rule take precedence. Every crypto-to-crypto swap is a disposal event.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.20, "registrationThreshold": 90000, "name": "VAT" },
+  "filingDeadlines": [
+    { "name": "Online Self Assessment", "description": "File SA return and pay tax due", "month": 1, "day": 31, "alertDaysBefore": [90, 60, 30, 14, 7, 1] },
+    { "name": "Payment on Account 2", "description": "Second payment on account for prior year", "month": 7, "day": 31, "alertDaysBefore": [30, 14, 7] }
+  ],
+  "mainForms": ["SA100", "SA103F", "SA108"],
+  "tradingAllowance": 1000,
+  "pensionContributionRelief": true,
+  "generatedByAI": false,
+  "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇺🇸 US — United States
+
+```json
+{
+  "countryCode": "US",
+  "countryName": "United States",
+  "currency": "USD",
+  "currencySymbol": "$",
+  "taxAuthority": "IRS",
+  "taxAuthorityUrl": "https://www.irs.gov/businesses/small-businesses-self-employed",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 14600,
+    "brackets": [
+      { "min": 0, "max": 11600, "rate": 0.10 },
+      { "min": 11600, "max": 47150, "rate": 0.12 },
+      { "min": 47150, "max": 100525, "rate": 0.22 },
+      { "min": 100525, "max": 191950, "rate": 0.24 },
+      { "min": 191950, "max": 243725, "rate": 0.32 },
+      { "min": 243725, "max": 609350, "rate": 0.35 },
+      { "min": 609350, "max": null, "rate": 0.37 }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Self-Employment Tax",
+    "description": "SE tax covers Social Security and Medicare. Deduct 50% from income.",
+    "components": [
+      { "name": "Social Security", "rate": 0.124, "onIncomeUpTo": 168600 },
+      { "name": "Medicare", "rate": 0.029, "onIncomeAbove": 0 },
+      { "name": "Additional Medicare", "rate": 0.009, "onIncomeAbove": 200000 }
+    ]
+  },
+  "capitalGains": {
+    "annualExemption": 0,
+    "rates": [
+      { "condition": "short-term (held < 1 year)", "rate": "ordinary_income_rate" },
+      { "condition": "long-term, income <= $47,025", "rate": 0.00 },
+      { "condition": "long-term, income <= $518,900", "rate": 0.15 },
+      { "condition": "long-term, income > $518,900", "rate": 0.20 }
+    ],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "IRS treats crypto as property. FIFO is default but specific identification is permitted. Every disposal (including crypto-to-crypto) is a taxable event. Wash sale rules do NOT currently apply to crypto.",
+    "holdingPeriodForReducedRate": 365
+  },
+  "vat": { "standardRate": 0, "registrationThreshold": 0, "name": "Sales Tax (state-level, not federal)" },
+  "filingDeadlines": [
+    { "name": "Annual Tax Return", "description": "Form 1040 with Schedule C and D", "month": 4, "day": 15, "alertDaysBefore": [90, 60, 30, 14, 7] },
+    { "name": "Q1 Estimated Tax", "description": "First quarterly estimated payment", "month": 4, "day": 15, "alertDaysBefore": [14, 7] },
+    { "name": "Q2 Estimated Tax", "description": "Second quarterly estimated payment", "month": 6, "day": 17, "alertDaysBefore": [14, 7] },
+    { "name": "Q3 Estimated Tax", "description": "Third quarterly estimated payment", "month": 9, "day": 16, "alertDaysBefore": [14, 7] },
+    { "name": "Q4 Estimated Tax", "description": "Fourth quarterly estimated payment", "month": 1, "day": 15, "alertDaysBefore": [14, 7] }
+  ],
+  "mainForms": ["1040", "Schedule C", "Schedule D", "Form 8949", "SE"],
+  "pensionContributionRelief": true,
+  "notes": "State income tax varies by state (0–13.3%). Configure your state rate separately.",
+  "generatedByAI": false,
+  "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇨🇦 CA — Canada
+
+```json
+{
+  "countryCode": "CA",
+  "countryName": "Canada",
+  "currency": "CAD",
+  "currencySymbol": "$",
+  "taxAuthority": "Canada Revenue Agency (CRA)",
+  "taxAuthorityUrl": "https://www.canada.ca/en/revenue-agency.html",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 15705,
+    "brackets": [
+      { "min": 0, "max": 55867, "rate": 0.15 },
+      { "min": 55867, "max": 111733, "rate": 0.205 },
+      { "min": 111733, "max": 154906, "rate": 0.26 },
+      { "min": 154906, "max": 220000, "rate": 0.29 },
+      { "min": 220000, "max": null, "rate": 0.33 }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Canada Pension Plan (CPP)",
+    "description": "Self-employed pay both employee and employer portions of CPP",
+    "components": [
+      { "name": "CPP (self-employed rate)", "rate": 0.114, "onIncomeAbove": 3500, "onIncomeUpTo": 68500 }
+    ]
+  },
+  "capitalGains": {
+    "annualExemption": 0,
+    "rates": [{ "condition": "all capital gains (50% inclusion rate)", "rate": "50%_of_income_rate" }],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "CRA treats crypto as a commodity. 50% of capital gains are included in income. Day trading crypto may be treated as business income (100% taxable).",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.05, "registrationThreshold": 30000, "name": "GST/HST" },
+  "filingDeadlines": [
+    { "name": "T1 Personal Return", "description": "Self-employed deadline (extended from April 30)", "month": 6, "day": 15, "alertDaysBefore": [90, 30, 14, 7] },
+    { "name": "Balance owing", "description": "Any tax owed still due April 30 despite June 15 filing extension", "month": 4, "day": 30, "alertDaysBefore": [30, 14, 7] }
+  ],
+  "mainForms": ["T1", "T2125"],
+  "notes": "Provincial income tax varies by province. Federal rates shown. Ontario adds ~9.15–13.16%, BC adds ~5.06–20.5% etc.",
+  "generatedByAI": false,
+  "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇦🇺 AU — Australia
+
+```json
+{
+  "countryCode": "AU",
+  "countryName": "Australia",
+  "currency": "AUD",
+  "currencySymbol": "$",
+  "taxAuthority": "Australian Taxation Office (ATO)",
+  "taxAuthorityUrl": "https://www.ato.gov.au",
+  "taxYear": { "type": "fiscal", "fiscalStartMonth": 7, "fiscalStartDay": 1, "labelFormat": "split" },
+  "incomeTax": {
+    "personalAllowance": 18200,
+    "brackets": [
+      { "min": 0, "max": 18200, "rate": 0 },
+      { "min": 18200, "max": 45000, "rate": 0.19 },
+      { "min": 45000, "max": 120000, "rate": 0.325 },
+      { "min": 120000, "max": 180000, "rate": 0.37 },
+      { "min": 180000, "max": null, "rate": 0.45 }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Medicare Levy",
+    "description": "2% levy on taxable income for Medicare funding",
+    "components": [{ "name": "Medicare Levy", "rate": 0.02, "onIncomeAbove": 26000 }]
+  },
+  "capitalGains": {
+    "annualExemption": 0,
+    "rates": [
+      { "condition": "held < 12 months", "rate": "ordinary_income_rate" },
+      { "condition": "held >= 12 months (50% discount)", "rate": "50%_of_income_rate" }
+    ],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "ATO treats crypto as property. 50% CGT discount applies if held > 12 months. Each crypto-to-crypto swap is a CGT event.",
+    "holdingPeriodForReducedRate": 365
+  },
+  "vat": { "standardRate": 0.10, "registrationThreshold": 75000, "name": "GST" },
+  "filingDeadlines": [
+    { "name": "Individual Tax Return", "description": "Self-lodgement deadline", "month": 10, "day": 31, "alertDaysBefore": [90, 30, 14, 7] }
+  ],
+  "mainForms": ["Individual Tax Return (myTax)", "Business Schedule"],
+  "generatedByAI": false,
+  "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇩🇪 DE — Germany
+
+```json
+{
+  "countryCode": "DE",
+  "countryName": "Germany",
+  "currency": "EUR",
+  "currencySymbol": "€",
+  "taxAuthority": "Finanzamt",
+  "taxAuthorityUrl": "https://www.elster.de",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 11604,
+    "brackets": [
+      { "min": 0, "max": 11604, "rate": 0 },
+      { "min": 11604, "max": 17005, "rate": 0.14 },
+      { "min": 17005, "max": 66760, "rate": "progressive_14_to_42" },
+      { "min": 66760, "max": 277825, "rate": 0.42 },
+      { "min": 277825, "max": null, "rate": 0.45, "label": "Reichensteuer" }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Kranken- und Rentenversicherung",
+    "description": "Self-employed (Selbständige) pay health and pension insurance directly. Rates vary. Künstlersozialkasse (KSK) applies to creative freelancers at ~50% reduced rate.",
+    "components": [
+      { "name": "Health Insurance (approx)", "rate": 0.149, "onIncomeAbove": 0 },
+      { "name": "Pension Insurance (optional)", "rate": 0.186, "onIncomeAbove": 0 }
+    ]
+  },
+  "capitalGains": {
+    "annualExemption": 1000,
+    "rates": [{ "condition": "Abgeltungsteuer (flat)", "rate": 0.25 }],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "Crypto held > 1 year is TAX FREE in Germany (Spekulationsfrist). Held < 1 year: taxed as ordinary income. Staking/lending may remove the 1-year exemption.",
+    "holdingPeriodForReducedRate": 365
+  },
+  "vat": { "standardRate": 0.19, "registrationThreshold": 22000, "name": "Mehrwertsteuer (MwSt)" },
+  "filingDeadlines": [
+    { "name": "Einkommensteuererklärung", "description": "Annual income tax return via ELSTER", "month": 7, "day": 31, "alertDaysBefore": [90, 30, 14, 7] }
+  ],
+  "mainForms": ["Anlage S (Selbständige)", "Anlage SO (Sonstige Einkünfte)", "Anlage KAP"],
+  "notes": "Gewerbesteuer (trade tax) applies if running a Gewerbe (commercial business), not a Freiberufler. Freiberufler (freelancers in recognised professions) are exempt.",
+  "generatedByAI": false,
+  "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇫🇷 FR — France
+
+```json
+{
+  "countryCode": "FR", "countryName": "France", "currency": "EUR", "currencySymbol": "€",
+  "taxAuthority": "Direction Générale des Finances Publiques (DGFiP)",
+  "taxAuthorityUrl": "https://www.impots.gouv.fr",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 10777,
+    "brackets": [
+      { "min": 0, "max": 10777, "rate": 0 },
+      { "min": 10777, "max": 27478, "rate": 0.11 },
+      { "min": 27478, "max": 78570, "rate": 0.30 },
+      { "min": 78570, "max": 168994, "rate": 0.41 },
+      { "min": 168994, "max": null, "rate": 0.45 }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Cotisations sociales (auto-entrepreneur)",
+    "description": "Auto-entrepreneur regime: flat rate on turnover covers all social contributions",
+    "components": [
+      { "name": "Liberal professions (CIPAV)", "rate": 0.221, "onIncomeAbove": 0 },
+      { "name": "Commercial/service activities", "rate": 0.124, "onIncomeAbove": 0 }
+    ]
+  },
+  "capitalGains": {
+    "annualExemption": 0,
+    "rates": [{ "condition": "Flat Tax (Prélèvement Forfaitaire Unique)", "rate": 0.30 }],
+    "cryptoMethod": "average_cost",
+    "cryptoNotes": "France uses CUMP (coût unitaire moyen pondéré) — weighted average cost per asset. 30% flat tax (PFU) on gains. Annual allowance of €305 below which gains are exempt.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.20, "registrationThreshold": 36800, "name": "TVA" },
+  "filingDeadlines": [
+    { "name": "Déclaration de revenus", "description": "Online filing deadline (varies by department)", "month": 6, "day": 8, "alertDaysBefore": [60, 30, 14, 7] }
+  ],
+  "mainForms": ["2042", "2042-C-PRO", "2086 (crypto)"],
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇳🇱 NL — Netherlands
+
+```json
+{
+  "countryCode": "NL", "countryName": "Netherlands", "currency": "EUR", "currencySymbol": "€",
+  "taxAuthority": "Belastingdienst", "taxAuthorityUrl": "https://www.belastingdienst.nl",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 0,
+    "brackets": [
+      { "min": 0, "max": 75518, "rate": 0.3697, "label": "Box 1 lower (includes social premiums)" },
+      { "min": 75518, "max": null, "rate": 0.495, "label": "Box 1 upper" }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Zelfstandigenaftrek + MKB-winstvrijstelling",
+    "description": "Self-employed deduction of €5,030 + 12.7% SME profit exemption. Social premiums included in Box 1 rate.",
+    "components": []
+  },
+  "capitalGains": {
+    "annualExemption": 57000,
+    "rates": [{ "condition": "Box 3 deemed return (fictitious rate ~6.04%)", "rate": 0.36 }],
+    "cryptoMethod": "average_cost",
+    "cryptoNotes": "Netherlands taxes crypto under Box 3 (wealth tax) — not on actual gains but on deemed return of ~6% on the asset value on Jan 1. Report crypto value on Jan 1 each year.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.21, "registrationThreshold": 0, "name": "BTW" },
+  "filingDeadlines": [
+    { "name": "Inkomstenbelasting aangifte", "description": "Annual income tax return", "month": 5, "day": 1, "alertDaysBefore": [60, 30, 14, 7] }
+  ],
+  "mainForms": ["M-biljet", "IB-aangifte"],
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇮🇪 IE — Ireland
+
+```json
+{
+  "countryCode": "IE", "countryName": "Ireland", "currency": "EUR", "currencySymbol": "€",
+  "taxAuthority": "Revenue Commissioners", "taxAuthorityUrl": "https://www.revenue.ie",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 1875,
+    "brackets": [
+      { "min": 0, "max": 42000, "rate": 0.20, "label": "Standard Rate" },
+      { "min": 42000, "max": null, "rate": 0.40, "label": "Higher Rate" }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "PRSI + USC",
+    "description": "Pay Related Social Insurance (Class S: 4%) + Universal Social Charge",
+    "components": [
+      { "name": "PRSI Class S", "rate": 0.04, "onIncomeAbove": 5000 },
+      { "name": "USC Band 1", "rate": 0.005, "onIncomeAbove": 0, "onIncomeUpTo": 12012 },
+      { "name": "USC Band 2", "rate": 0.02, "onIncomeAbove": 12012, "onIncomeUpTo": 25760 },
+      { "name": "USC Band 3", "rate": 0.04, "onIncomeAbove": 25760, "onIncomeUpTo": 70044 },
+      { "name": "USC Band 4", "rate": 0.08, "onIncomeAbove": 70044 }
+    ]
+  },
+  "capitalGains": {
+    "annualExemption": 1270,
+    "rates": [{ "condition": "standard", "rate": 0.33 }],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "Revenue treats crypto as a chargeable asset. 33% CGT. Annual exemption €1,270.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.23, "registrationThreshold": 37500, "name": "VAT" },
+  "filingDeadlines": [
+    { "name": "Form 11 (ROS)", "description": "Self-assessed income tax return", "month": 11, "day": 14, "alertDaysBefore": [60, 30, 14, 7] },
+    { "name": "Preliminary Tax", "description": "90% of current year liability due", "month": 11, "day": 14, "alertDaysBefore": [30, 14, 7] }
+  ],
+  "mainForms": ["Form 11", "Form CG1"],
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇪🇸 ES — Spain
+
+```json
+{
+  "countryCode": "ES", "countryName": "Spain", "currency": "EUR", "currencySymbol": "€",
+  "taxAuthority": "Agencia Estatal de Administración Tributaria (AEAT)", "taxAuthorityUrl": "https://www.agenciatributaria.es",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 5550,
+    "brackets": [
+      { "min": 0, "max": 12450, "rate": 0.19 },
+      { "min": 12450, "max": 20200, "rate": 0.24 },
+      { "min": 20200, "max": 35200, "rate": 0.30 },
+      { "min": 35200, "max": 60000, "rate": 0.37 },
+      { "min": 60000, "max": 300000, "rate": 0.45 },
+      { "min": 300000, "max": null, "rate": 0.47 }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Cuota de autónomos (RETA)",
+    "description": "Monthly flat contribution based on estimated net income bracket",
+    "components": [{ "name": "Cuota mínima (net income < €670/mo)", "flatAnnualAmount": 3456 }]
+  },
+  "capitalGains": {
+    "annualExemption": 0,
+    "rates": [
+      { "condition": "up to €6,000", "rate": 0.19 },
+      { "condition": "€6,001–€50,000", "rate": 0.21 },
+      { "condition": "€50,001–€200,000", "rate": 0.23 },
+      { "condition": "above €200,000", "rate": 0.26 }
+    ],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "Spain taxes crypto gains as savings income (renta del ahorro). FIFO method. Modelo 721 required for crypto held abroad > €50,000.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.21, "registrationThreshold": 0, "name": "IVA" },
+  "filingDeadlines": [
+    { "name": "Declaración de la Renta (IRPF)", "description": "Annual income tax return", "month": 6, "day": 30, "alertDaysBefore": [60, 30, 14, 7] }
+  ],
+  "mainForms": ["Modelo 100", "Modelo 130 (quarterly)", "Modelo 721 (crypto abroad)"],
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇮🇹 IT — Italy
+
+```json
+{
+  "countryCode": "IT", "countryName": "Italy", "currency": "EUR", "currencySymbol": "€",
+  "taxAuthority": "Agenzia delle Entrate", "taxAuthorityUrl": "https://www.agenziaentrate.gov.it",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 8174,
+    "brackets": [
+      { "min": 0, "max": 28000, "rate": 0.23 },
+      { "min": 28000, "max": 50000, "rate": 0.35 },
+      { "min": 50000, "max": null, "rate": 0.43 }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Contributi previdenziali (Gestione Separata INPS)",
+    "description": "Separate management fund for freelancers without a specific professional fund",
+    "components": [{ "name": "Gestione Separata", "rate": 0.2607, "onIncomeAbove": 0 }]
+  },
+  "capitalGains": {
+    "annualExemption": 0,
+    "rates": [{ "condition": "imposta sostitutiva", "rate": 0.26 }],
+    "cryptoMethod": "lifo",
+    "cryptoNotes": "Italy taxes crypto gains at 26% flat. Exempt if total gains < €2,000/year. RW form required for foreign crypto holdings.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.22, "registrationThreshold": 0, "name": "IVA" },
+  "filingDeadlines": [
+    { "name": "Modello Redditi", "description": "Annual tax return", "month": 11, "day": 30, "alertDaysBefore": [60, 30, 14, 7] }
+  ],
+  "mainForms": ["Modello Redditi PF", "Quadro LM (forfettario)", "Quadro RW"],
+  "notes": "Regime forfettario (flat-rate scheme) available for turnover < €85,000. Tax rate 5% (first 5 years) or 15% on 78% of turnover. Very favourable for new freelancers.",
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇵🇹 PT — Portugal
+
+```json
+{
+  "countryCode": "PT", "countryName": "Portugal", "currency": "EUR", "currencySymbol": "€",
+  "taxAuthority": "Autoridade Tributária e Aduaneira (AT)", "taxAuthorityUrl": "https://www.portaldasfinancas.gov.pt",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 8500,
+    "brackets": [
+      { "min": 0, "max": 7703, "rate": 0.135 },
+      { "min": 7703, "max": 11623, "rate": 0.18 },
+      { "min": 11623, "max": 16472, "rate": 0.23 },
+      { "min": 16472, "max": 21321, "rate": 0.26 },
+      { "min": 21321, "max": 27146, "rate": 0.3275 },
+      { "min": 27146, "max": 39791, "rate": 0.37 },
+      { "min": 39791, "max": 51997, "rate": 0.435 },
+      { "min": 51997, "max": 81199, "rate": 0.45 },
+      { "min": 81199, "max": null, "rate": 0.48 }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Segurança Social (Recibos Verdes)",
+    "description": "Social security for self-employed (green receipts). Based on relevant income.",
+    "components": [{ "name": "Segurança Social", "rate": 0.214, "onIncomeAbove": 0 }]
+  },
+  "capitalGains": {
+    "annualExemption": 0,
+    "rates": [{ "condition": "standard", "rate": 0.28 }],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "Portugal introduced crypto tax in 2023. Gains from crypto held < 1 year taxed at 28%. Held > 1 year is TAX FREE. NHR (Non-Habitual Resident) regime may offer 0% on foreign source crypto.",
+    "holdingPeriodForReducedRate": 365
+  },
+  "vat": { "standardRate": 0.23, "registrationThreshold": 13500, "name": "IVA" },
+  "filingDeadlines": [
+    { "name": "IRS Declaration", "description": "Annual income tax return", "month": 6, "day": 30, "alertDaysBefore": [60, 30, 14, 7] }
+  ],
+  "mainForms": ["Modelo 3", "Anexo B (self-employment)", "Anexo G (capital gains)"],
+  "notes": "NHR regime (or its replacement IFICI from 2024) can provide significant tax advantages for new residents. Worth investigating.",
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇸🇬 SG — Singapore
+
+```json
+{
+  "countryCode": "SG", "countryName": "Singapore", "currency": "SGD", "currencySymbol": "S$",
+  "taxAuthority": "Inland Revenue Authority of Singapore (IRAS)", "taxAuthorityUrl": "https://www.iras.gov.sg",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 20000,
+    "brackets": [
+      { "min": 0, "max": 20000, "rate": 0 },
+      { "min": 20000, "max": 30000, "rate": 0.02 },
+      { "min": 30000, "max": 40000, "rate": 0.035 },
+      { "min": 40000, "max": 80000, "rate": 0.07 },
+      { "min": 80000, "max": 120000, "rate": 0.115 },
+      { "min": 120000, "max": 160000, "rate": 0.15 },
+      { "min": 160000, "max": 200000, "rate": 0.18 },
+      { "min": 200000, "max": 240000, "rate": 0.19 },
+      { "min": 240000, "max": 280000, "rate": 0.195 },
+      { "min": 280000, "max": 320000, "rate": 0.20 },
+      { "min": 320000, "max": 500000, "rate": 0.22 },
+      { "min": 500000, "max": 1000000, "rate": 0.23 },
+      { "min": 1000000, "max": null, "rate": 0.24 }
+    ]
+  },
+  "selfEmploymentLevy": {
+    "name": "Medisave (CPF)",
+    "description": "Self-employed contribute to Medisave only (not full CPF). Rate depends on age and income.",
+    "components": [{ "name": "Medisave contribution", "rate": 0.085, "onIncomeAbove": 6000 }]
+  },
+  "capitalGains": {
+    "annualExemption": 0,
+    "rates": [{ "condition": "NO capital gains tax in Singapore", "rate": 0 }],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "Singapore has NO capital gains tax. However, frequent crypto trading may be treated as income (trading income). IRAS applies 'badges of trade' test.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.09, "registrationThreshold": 1000000, "name": "GST" },
+  "filingDeadlines": [
+    { "name": "Income Tax Return (Form B/B1)", "description": "Self-employed individuals", "month": 4, "day": 15, "alertDaysBefore": [60, 30, 14, 7] }
+  ],
+  "mainForms": ["Form B", "Form B1"],
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇦🇪 AE — United Arab Emirates
+
+```json
+{
+  "countryCode": "AE", "countryName": "United Arab Emirates", "currency": "AED", "currencySymbol": "د.إ",
+  "taxAuthority": "Federal Tax Authority (FTA)", "taxAuthorityUrl": "https://tax.gov.ae",
+  "taxYear": { "type": "calendar", "labelFormat": "single" },
+  "incomeTax": {
+    "personalAllowance": 999999999,
+    "brackets": [{ "min": 0, "max": null, "rate": 0, "label": "No personal income tax in UAE" }]
+  },
+  "selfEmploymentLevy": { "name": "None", "description": "No self-employment tax for individuals", "components": [] },
+  "capitalGains": {
+    "annualExemption": 999999999,
+    "rates": [{ "condition": "No capital gains tax on individuals", "rate": 0 }],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "No personal capital gains tax in UAE. However, Corporate Tax at 9% applies to businesses with net income > AED 375,000 from June 2023. Freelancers with a Freezone license may qualify for 0% CT.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.05, "registrationThreshold": 375000, "name": "VAT" },
+  "filingDeadlines": [
+    { "name": "VAT Return (if registered)", "description": "Quarterly VAT return", "month": 0, "day": 28, "alertDaysBefore": [14, 7] }
+  ],
+  "mainForms": ["VAT Return (if applicable)", "Corporate Tax Return (if business)"],
+  "notes": "UAE has no personal income tax. Track income for record-keeping and VAT compliance only. Corporate Tax implications apply if operating as a company.",
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇮🇳 IN — India
+
+```json
+{
+  "countryCode": "IN", "countryName": "India", "currency": "INR", "currencySymbol": "₹",
+  "taxAuthority": "Income Tax Department", "taxAuthorityUrl": "https://www.incometax.gov.in",
+  "taxYear": { "type": "fiscal", "fiscalStartMonth": 4, "fiscalStartDay": 1, "labelFormat": "split" },
+  "incomeTax": {
+    "personalAllowance": 300000,
+    "brackets": [
+      { "min": 0, "max": 300000, "rate": 0, "label": "New Regime" },
+      { "min": 300000, "max": 600000, "rate": 0.05 },
+      { "min": 600000, "max": 900000, "rate": 0.10 },
+      { "min": 900000, "max": 1200000, "rate": 0.15 },
+      { "min": 1200000, "max": 1500000, "rate": 0.20 },
+      { "min": 1500000, "max": null, "rate": 0.30 }
+    ]
+  },
+  "selfEmploymentLevy": { "name": "None (separate)", "description": "No separate SE levy; income included in IT slab", "components": [] },
+  "capitalGains": {
+    "annualExemption": 100000,
+    "rates": [
+      { "condition": "short-term (equity < 1 year)", "rate": 0.20 },
+      { "condition": "long-term (equity > 1 year, above ₹1L exemption)", "rate": 0.125 },
+      { "condition": "other assets short-term", "rate": "slab_rate" },
+      { "condition": "other assets long-term (> 2 years)", "rate": 0.125 }
+    ],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "India taxes crypto/VDA (Virtual Digital Assets) at a flat 30% regardless of holding period. No deductions allowed except cost of acquisition. 1% TDS deducted at source on transactions > ₹10,000.",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.18, "registrationThreshold": 2000000, "name": "GST" },
+  "filingDeadlines": [
+    { "name": "ITR Filing", "description": "Income Tax Return (non-audit cases)", "month": 7, "day": 31, "alertDaysBefore": [60, 30, 14, 7] },
+    { "name": "Advance Tax Q1", "description": "First instalment of advance tax", "month": 6, "day": 15, "alertDaysBefore": [14, 7] }
+  ],
+  "mainForms": ["ITR-3 (business/profession)", "ITR-4 (Sugam presumptive)"],
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+#### 🇿🇦 ZA — South Africa
+
+```json
+{
+  "countryCode": "ZA", "countryName": "South Africa", "currency": "ZAR", "currencySymbol": "R",
+  "taxAuthority": "South African Revenue Service (SARS)", "taxAuthorityUrl": "https://www.sars.gov.za",
+  "taxYear": { "type": "fiscal", "fiscalStartMonth": 3, "fiscalStartDay": 1, "labelFormat": "split" },
+  "incomeTax": {
+    "personalAllowance": 95750,
+    "brackets": [
+      { "min": 0, "max": 237100, "rate": 0.18 },
+      { "min": 237100, "max": 370500, "rate": 0.26 },
+      { "min": 370500, "max": 512800, "rate": 0.31 },
+      { "min": 512800, "max": 673000, "rate": 0.36 },
+      { "min": 673000, "max": 857900, "rate": 0.39 },
+      { "min": 857900, "max": 1817000, "rate": 0.41 },
+      { "min": 1817000, "max": null, "rate": 0.45 }
+    ]
+  },
+  "selfEmploymentLevy": { "name": "None separate", "description": "Provisional taxpayer system — two advance payments during the year", "components": [] },
+  "capitalGains": {
+    "annualExemption": 40000,
+    "rates": [{ "condition": "40% inclusion rate, then taxed at income rate", "rate": "40%_of_income_rate" }],
+    "cryptoMethod": "fifo",
+    "cryptoNotes": "SARS treats crypto as an asset. Gains included at 40% in taxable income for individuals. Active traders may be taxed as revenue (100% inclusion).",
+    "holdingPeriodForReducedRate": null
+  },
+  "vat": { "standardRate": 0.15, "registrationThreshold": 1000000, "name": "VAT" },
+  "filingDeadlines": [
+    { "name": "ITR12 Return", "description": "Individual income tax return", "month": 10, "day": 23, "alertDaysBefore": [60, 30, 14, 7] }
+  ],
+  "mainForms": ["ITR12"],
+  "generatedByAI": false, "lastVerified": "2025-03-01"
+}
+```
+
+---
+
+For **🇨🇭 CH, 🇸🇪 SE, 🇳🇴 NO, 🇩🇰 DK, 🇫🇮 FI, 🇧🇪 BE, 🇦🇹 AT, 🇵🇱 PL, 🇨🇿 CZ, 🇬🇷 GR, 🇳🇿 NZ, 🇧🇷 BR, 🇲🇽 MX, 🇯🇵 JP** — write the adapter file using the same schema with accurate rates from your training knowledge for that country, clearly set `"generatedByAI": false` only if you are confident in the values. Mark as `"generatedByAI": true` with today's date if there is any uncertainty.
+
+---
+
+### Dynamic Adapter Generation (all other countries)
+
+If `COUNTRY_CODE` is not in the pre-built list above, generate a tax adapter dynamically:
+
+1. Tell the user: "I don't have a pre-built adapter for [country]. I'm going to generate one now using my knowledge of [country]'s tax system. You should verify the rates against [country's tax authority website] before relying on them for filing."
+
+2. Call Claude (yourself) with this prompt to generate the adapter JSON:
+
+```
+Generate a complete TaxAdapter JSON for [COUNTRY_NAME] ([COUNTRY_CODE]).
+Use the schema exactly as defined. Include:
+- Correct income tax brackets for the current tax year
+- Self-employment tax / social security equivalent
+- Capital gains rules including crypto treatment
+- VAT/GST threshold and rate
+- Filing deadlines with correct month/day
+- Main tax forms used
+- Any important notes (special regimes, state/provincial variations, etc.)
+
+Set generatedByAI: true and lastVerified to today's date.
+Include a disclaimer note explaining what should be verified.
+```
+
+3. Save the generated adapter to `~/.ai-accountant/tax-adapters/[COUNTRY_CODE].json`
+
+4. Tell the user: "Tax adapter generated for [country]. Please review it at `~/.ai-accountant/tax-adapters/[COUNTRY_CODE].json` and correct any values before your first filing. You can edit the JSON directly — changes take effect immediately."
 
 ---
 

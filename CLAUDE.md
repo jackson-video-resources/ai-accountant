@@ -59,6 +59,23 @@ WHERE tax_year_id = ? GROUP BY asset;
 
 `"weekly summary"` → Income and expenses this week vs last week, running YTD totals, days until next deadline.
 
+## Tax Adapter System
+
+Tax rules for this user are stored at `~/.ai-accountant/tax-adapters/[COUNTRY_CODE].json`. Always load the adapter for the user's country before any tax calculation.
+
+```typescript
+// Load the adapter at the start of any tax calculation
+const adapter = JSON.parse(
+  fs.readFileSync(`${os.homedir()}/.ai-accountant/tax-adapters/${config.countryCode}.json`, 'utf8')
+);
+```
+
+**If an adapter was AI-generated** (`generatedByAI: true`), remind the user to verify the rates when they ask for their first tax calculation: "Note: your tax adapter for [country] was AI-generated. Please verify the rates at [taxAuthorityUrl] before relying on this for filing."
+
+**If a user reports an incorrect rate**, update the adapter file directly and confirm: "Updated. The new rate will be used for all future calculations."
+
+**The adapter is the source of truth** for all bracket calculations, filing deadlines, CGT methods, and deadline alerts. Never hardcode country-specific tax rates in your responses — always read from the adapter.
+
 ## UK Tax Knowledge
 
 **Tax year:** April 6 to April 5. "2024-25" = April 6 2024 to April 5 2025. Never confuse with calendar year.
