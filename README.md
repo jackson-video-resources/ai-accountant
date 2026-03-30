@@ -11,6 +11,7 @@
 This is a free, open-source system that runs entirely on your own computer. It:
 
 - **Watches a folder** — drop any receipt, invoice, or bank statement in and it reads, categorises, and files it automatically within about 20 seconds
+- **JaxTax web dashboard** *(optional)* — upload receipts and invoices from your browser, review AI extraction before it's filed, search all your transactions visually at `http://localhost:7331`
 - **Reads your email** — forward receipts from Amazon, Adobe, AWS, etc. and they're filed without you touching anything
 - **Imports exchange data** — drop a CSV from any exchange in the world and it calculates your crypto tax using the correct legal method for your country. Known exchanges are parsed instantly; unknown ones are auto-detected by AI in seconds
 - **Calculates your taxes** — income tax, corporation tax, capital gains, NI contributions, salary/dividend splits, payments on account — whatever applies to your situation
@@ -61,6 +62,14 @@ You'll need both during setup.
 
 > **Telegram is optional.** If you skip it, the system still works — you just won't get automatic alerts.
 
+### 5. Docker *(optional — only needed for the JaxTax web dashboard)*
+
+If you want the browser-based JaxTax interface, you'll need Docker. It's free.
+
+Go to **[docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)** and download Docker Desktop for your platform. Install it and make sure it's running (you'll see the Docker whale icon in your menu bar / taskbar).
+
+> **Docker is optional.** If you skip it, you won't get the JaxTax web dashboard — but the folder-drop system, email listener, and everything else still works.
+
 ---
 
 ## Setup — 3 Steps
@@ -110,6 +119,27 @@ Behind the scenes: a full TypeScript application with a file watcher, OCR engine
 
 ---
 
+## JaxTax — The Optional Web Dashboard
+
+During setup, you can choose to install **JaxTax** — a browser-based interface for uploading and reviewing documents.
+
+![JaxTax runs at http://localhost:7331]
+
+**What JaxTax adds:**
+- Upload receipts, invoices, and photos from your browser — no folder drag-and-drop needed
+- See the AI extraction result before it's filed: vendor, date, amount, category
+- Review and correct documents visually
+- Search, filter, and browse all your transactions
+- Works on any device on your local network (phone, tablet, other laptop)
+
+**How it integrates:** Files uploaded through JaxTax land directly in your `inbox/receipts/` folder. Your ai-accountant system picks them up automatically — the two work as one.
+
+**It runs at:** `http://localhost:7331`
+
+**Built on:** [TaxHacker](https://github.com/vas3k/TaxHacker) (MIT licence) — an excellent open-source accounting UI by [@vas3k](https://github.com/vas3k), rebranded and extended with Anthropic/Claude support.
+
+---
+
 ## What It Costs
 
 | Thing | Cost | Notes |
@@ -118,6 +148,8 @@ Behind the scenes: a full TypeScript application with a file watcher, OCR engine
 | Anthropic API | ~$2–5/month | Per document processed — typical freelancer |
 | Anthropic API | ~$8–15/month | Active trader with lots of receipts |
 | Telegram | Free | Free forever |
+| Docker Desktop | Free | Only needed for JaxTax web dashboard |
+| JaxTax web dashboard | Free | Open source, runs locally |
 | Node.js, PM2, everything else | Free | All open source |
 | This system | Free | Free forever |
 
@@ -248,6 +280,12 @@ Yes. During or after setup, drop prior-year bank statements and exchange CSVs in
 
 **Does it actually file my taxes for me?**
 It calculates everything and prepares all the data. You still press submit on your tax authority's website (HMRC, IRS, etc.). This takes 20 minutes when all your numbers are already organised. Automated filing is a future feature pending API access from tax authorities.
+
+**What is JaxTax and do I need it?**
+JaxTax is an optional web dashboard that lets you upload documents from a browser instead of (or as well as) dropping files in a folder. It's useful if you prefer a visual interface or want to upload from your phone. You don't need it — the folder-drop system works perfectly without it. During setup, just answer "no" when asked and you can always add it later.
+
+**Does JaxTax replace the folder system?**
+No — it adds to it. Files uploaded through JaxTax land in the same `inbox/receipts/` folder, and the same tax engine processes them. The two systems work as one.
 
 ---
 
