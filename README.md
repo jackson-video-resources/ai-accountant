@@ -1,41 +1,94 @@
 # AI Accountant — Your Personal Accountancy Firm, Built by Claude Code
 
-> One prompt. Zero accountancy fees. Full tax automation.
+> One prompt. Zero accountancy fees. Full tax automation. Every country.
 
-This repo contains the one-shot Claude Code prompt that builds a complete, locally-running AI accountancy system on your machine. Drop receipts into a folder. Forward invoices by email. Import trading CSVs from any exchange. Then ask "what do I owe?" and get a real answer.
-
-No cloud. No subscription. No £150/hr accountant. Just Claude Code and a folder.
+**You don't need to know how to code.** You paste one thing into a terminal. It builds everything. You never open a code file again.
 
 ---
 
-## What It Does
+## What Is This?
 
-- **Watches your inbox folder** — drop any receipt, invoice, or bank statement in and it gets processed automatically
-- **Reads your emails** — forward receipts to a local address and they're filed instantly
-- **Imports exchange CSVs** — drop a Binance, Coinbase or Kraken export and it calculates your CGT using the correct pooling method
-- **Knows your structure** — sole trader, limited company, or partnership. Different rules, different optimizations, different filing deadlines. You tell it what you are (or it helps you decide).
-- **Calculates your taxes** — income tax, corporation tax, NI/SE levy, capital gains, salary/dividend splits, director loan account, payments on account
-- **Finds tax savings** — suggests the optimal salary/dividend split, pension contributions, home office, CGT allowance, R&D credits, spouse employment, and more — all specific to your entity type
-- **Alerts you on Telegram** — weekly summaries, deadline warnings at 90/30/7/1 days, and a "confirm to run" button at filing time
-- **Remembers everything** — all data lives in a local SQLite database that Claude can query in plain English
+This is a free, open-source system that runs entirely on your own computer. It:
 
-Supports **every country in the world**. Pre-built tax adapters for 30+ countries. For anywhere else, Claude generates your country's tax adapter during setup using its knowledge of local tax law — verified and saved to your machine.
+- **Watches a folder** — drop any receipt, invoice, or bank statement in and it reads, categorises, and files it automatically within about 20 seconds
+- **Reads your email** — forward receipts from Amazon, Adobe, AWS, etc. and they're filed without you touching anything
+- **Imports exchange data** — drop a CSV from Binance, Coinbase, Kraken, or 10 other exchanges and it calculates your crypto tax using the correct legal method for your country
+- **Calculates your taxes** — income tax, corporation tax, capital gains, NI contributions, salary/dividend splits, payments on account — whatever applies to your situation
+- **Finds savings you're missing** — pension contributions, home office, mileage, salary/dividend optimisation, CGT allowance usage, R&D credits — specific to your structure and country
+- **Texts you on Telegram** — weekly summaries, deadline alerts at 90/30/7/1 days, and a confirm button when it's time to file
+- **Answers your questions** — open a terminal and ask "what do I owe?" or "what can I claim for my laptop?" and get a real answer based on your actual data
 
----
-
-## Quick Start
-
-**Step 1** — Make sure you have [Claude Code](https://claude.ai/code) and Node.js 18+ installed
-
-**Step 2** — Open Claude Code and paste the contents of [docs/SETUP-PROMPT.md](docs/SETUP-PROMPT.md)
-
-**Step 3** — Answer 8 questions. Watch it build your accountancy firm.
-
-That's it. The entire system is built, configured and running in under 15 minutes.
+Everything runs locally. Your financial data never leaves your computer.
 
 ---
 
-## What Gets Built
+## Before You Start — What You Need
+
+You need **4 things**. Each one takes about 2 minutes to set up.
+
+### 1. Node.js (the engine that runs the system)
+
+Go to **[nodejs.org](https://nodejs.org)** and download the LTS version.
+
+- **Mac:** You can also run `brew install node` in Terminal if you have Homebrew
+- **Windows:** Download the installer, run it, click Next through everything
+- **Linux:** Run `nvm install 20`
+
+After installing, open Terminal (Mac/Linux) or Command Prompt (Windows) and type `node --version`. You should see `v18` or higher.
+
+### 2. Claude Code (the AI that builds and runs everything)
+
+Go to **[claude.ai/code](https://claude.ai/code)** and follow the install instructions.
+
+You'll need a Claude account ($20/month plan). If you already pay for Claude, you likely have access.
+
+### 3. Anthropic API Key (the key the system uses to read your receipts)
+
+Go to **[console.anthropic.com](https://console.anthropic.com)**, sign in with your Claude account, go to **API Keys**, and create a new key. It starts with `sk-ant-`. Copy it — you'll paste it during setup.
+
+**Cost:** About $2–5/month for a typical freelancer. You're charged per document processed, not a flat fee.
+
+### 4. Telegram (how the system texts you)
+
+Download Telegram if you don't have it. Then:
+
+1. Search for **@BotFather** in Telegram and start a chat
+2. Send `/newbot` — it'll ask for a name, call it whatever you like (e.g. "My Tax Bot")
+3. It gives you a **token** — a long string like `123456789:ABCdefGHI...` — copy it
+4. Search for **@userinfobot** in Telegram and send it any message — it replies with your **chat ID** (a number like `987654321`) — copy that too
+
+You'll need both during setup.
+
+> **Telegram is optional.** If you skip it, the system still works — you just won't get automatic alerts.
+
+---
+
+## Setup — 3 Steps
+
+### Step 1 — Open Claude Code
+
+On **Mac/Linux:** Open Terminal, type `claude`, press Enter.
+
+On **Windows:** Open Command Prompt or PowerShell, type `claude`, press Enter.
+
+### Step 2 — Copy the setup prompt
+
+Go to **[docs/SETUP-PROMPT.md](docs/SETUP-PROMPT.md)** on GitHub. Click the **copy** button (top-right of the file). The entire contents are now in your clipboard.
+
+### Step 3 — Paste and answer 8 questions
+
+Paste into Claude Code and press Enter. It will:
+1. Check your machine is ready
+2. Ask you 8 questions (name, country, structure, crypto, API key, Telegram)
+3. Build your entire accountancy system automatically
+4. Run a test to confirm everything works
+5. Show you a live summary
+
+**Total time: about 12 minutes.** Most of that is package installation running in the background.
+
+---
+
+## What Gets Built on Your Computer
 
 ```
 ~/ai-accountant/
@@ -46,81 +99,211 @@ That's it. The entire system is built, configured and running in under 15 minute
 │   └── exchanges/
 │       ├── binance/       ← Binance trade history CSV
 │       ├── coinbase/
-│       └── kraken/
-├── processed/             ← auto-archived after processing
-├── reports/               ← generated tax summaries and SA302s
-└── exports/               ← accountant-ready packs
+│       ├── kraken/
+│       └── ...
+├── processed/             ← files move here after processing
+├── reports/               ← generated tax summaries and PDFs
+└── exports/               ← accountant-ready document packs
 ```
 
-Plus a full TypeScript application with file watcher, OCR engine, Claude classifier, CGT calculator, UK/US tax engine, Telegram bot, and cron scheduler — all running locally via PM2.
+Behind the scenes: a full TypeScript application with a file watcher, OCR engine, AI classifier, CGT calculator, tax engine, Telegram bot, and deadline scheduler — all running silently in the background via PM2.
 
 ---
 
-## Costs
+## What It Costs
 
-| Item | Cost |
-|------|------|
-| Claude Code | $20/month (you likely have this already) |
-| Anthropic API usage | ~$2–5/month for a typical freelancer |
-| Telegram | Free |
-| Everything else | Free — runs on your machine |
+| Thing | Cost | Notes |
+|-------|------|-------|
+| Claude Code | $20/month | You likely already pay this |
+| Anthropic API | ~$2–5/month | Per document processed — typical freelancer |
+| Anthropic API | ~$8–15/month | Active trader with lots of receipts |
+| Telegram | Free | Free forever |
+| Node.js, PM2, everything else | Free | All open source |
+| This system | Free | Free forever |
 
-You will never pay an accountant £150/hr to sort receipts again.
-
----
-
-## Prerequisites
-
-- Node.js 18+ ([nodejs.org](https://nodejs.org))
-- Claude Code installed and authenticated
-- Anthropic API key ([console.anthropic.com](https://console.anthropic.com))
-- Telegram account (for alerts — optional but recommended)
-- Mac, Windows (WSL2), or Linux
+**Compared to:** UK accountant £300–750/year. US CPA $500–2,000/year. Dedicated crypto tax tool (Koinly etc.) £100–200/year.
 
 ---
 
-## Tax Support
+## Works On
 
-Every country is supported via a `TaxAdapter` — a structured rules file that tells the system your country's tax brackets, filing deadlines, capital gains method, self-employment rules, and expense categories.
-
-**Pre-built adapters (reviewed, maintained):**
-
-| Region | Countries |
-|--------|-----------|
-| 🇬🇧 British Isles | United Kingdom, Ireland |
-| 🇺🇸 Americas | United States, Canada, Australia, New Zealand, Brazil, Mexico |
-| 🇩🇪 Europe | Germany, France, Netherlands, Spain, Italy, Portugal, Switzerland, Belgium, Austria, Sweden, Norway, Denmark, Finland, Poland, Czech Republic, Greece |
-| 🌏 Asia-Pacific | Singapore, Japan, India, South Africa |
-| 🇦🇪 Special | UAE, Cayman Islands (zero-income-tax configs) |
-
-**Every other country:**
-
-During setup, if your country doesn't have a pre-built adapter, Claude generates one on the fly using its knowledge of your country's tax law. The generated adapter is saved to your machine at `~/.ai-accountant/tax-adapters/[country].json`, clearly marked as AI-generated, and includes a prompt to verify the rates against your tax authority's current guidance.
-
-You can correct any values in the adapter file and the system will use your updated version immediately. Community-submitted adapters are welcomed via PR.
+| System | Support |
+|--------|---------|
+| Mac (Intel or Apple Silicon) | ✅ Full support |
+| Windows 10/11 | ✅ Full support |
+| Linux (Ubuntu, Debian, etc.) | ✅ Full support |
+| Linux VPS ($4–6/month, always on) | ✅ Recommended for always-on |
 
 ---
 
-## Privacy
+## What Structure Are You?
 
-Everything runs locally. Your financial documents never leave your machine. Only document *text* (not files) is sent to the Anthropic API for classification — and you'll be asked to confirm this during setup.
+During setup, you choose your business structure. Not sure? It asks you a few questions and recommends the best option.
+
+| Structure | Who it's for | What it tracks |
+|-----------|-------------|----------------|
+| **Sole Trader / Freelancer** | Self-employed individuals | Personal income tax, NI/SE levy, expenses, CGT |
+| **Limited Company / Corporation** | Directors, company owners | Corporation tax + personal salary/dividend tax + Director Loan Account |
+| **Partnership / LLP** | Two or more people sharing profits | Per-partner tax split, partnership return |
+
+The system optimises differently for each. A limited company director gets salary/dividend split recommendations. A sole trader gets pension contribution and home office suggestions.
+
+---
+
+## Tax Support — Every Country
+
+Pre-built tax adapters for 30+ countries. For any other country, the system generates your adapter during setup using Claude's knowledge of your local tax law, then waits for you to verify the rates before using them.
+
+### Pre-built (reviewed and maintained)
+
+| 🇬🇧 United Kingdom | 🇺🇸 United States | 🇨🇦 Canada | 🇦🇺 Australia |
+|---|---|---|---|
+| SA100 + SA103F | 1040 + Schedule C | T1 + T2125 | myTax Individual |
+| CGT Section 104 | FIFO / Specific ID | 50% inclusion | 50% discount (12+ months) |
+| Class 2/4 NI | SE Tax 15.3% | CPP contributions | Medicare levy |
+| Jan 31 deadline | Apr 15 deadline | Jun 15 deadline | Oct 31 deadline |
+
+| 🇩🇪 Germany | 🇫🇷 France | 🇳🇱 Netherlands | 🇮🇪 Ireland |
+|---|---|---|---|
+| Einkommensteuer | Impôt sur le revenu | Inkomstenbelasting | Form 11 (ROS) |
+| Crypto held >1yr = 0% tax | PFU 30% flat | Box 3 wealth tax | CGT 33% |
+| ELSTER Jul 31 | DGFiP Jun 30 | Belastingdienst May 1 | Revenue Nov 14 |
+
+| 🇪🇸 Spain | 🇮🇹 Italy | 🇵🇹 Portugal | 🇨🇭 Switzerland |
+|---|---|---|---|
+| IRPF Modelo 100 | Modello Redditi PF | IRS Modelo 3 | Kantonssteuer |
+| AEAT Jun 30 | Nov 30 | AT Jun 30 | Mar 31 |
+
+| 🇸🇪 Sweden | 🇳🇴 Norway | 🇩🇰 Denmark | 🇫🇮 Finland |
+|---|---|---|---|
+| Skatteverket | Skatteetaten | SKAT | Vero |
+
+| 🇧🇪 Belgium | 🇦🇹 Austria | 🇵🇱 Poland | 🇨🇿 Czech Republic |
+|---|---|---|---|
+| SPF Finances | Finanzamt AUT | Urząd Skarbowy | Finanční úřad |
+
+| 🇬🇷 Greece | 🇸🇬 Singapore | 🇯🇵 Japan | 🇮🇳 India |
+|---|---|---|---|
+| AADE | IRAS Form B | NTA | ITR-3 |
+| No CGT | No CGT | Crypto income tax | 30% flat crypto |
+
+| 🇿🇦 South Africa | 🇳🇿 New Zealand | 🇧🇷 Brazil | 🇲🇽 Mexico |
+|---|---|---|---|
+| SARS ITR12 | IR3 | Receita Federal | SAT |
+
+| 🇦🇪 UAE | 🇰🇾 Cayman Islands |
+|---|---|
+| No income tax | No income tax |
+
+**Any other country:** Claude generates your tax adapter during setup. You verify the rates against your tax authority before they're used. The adapter file is editable — change any value and it takes effect immediately.
+
+---
+
+## After Setup — How to Use It Day-to-Day
+
+**Logging expenses:** Drop the PDF or photo into `~/ai-accountant/inbox/receipts/`. Done. Within 20 seconds you'll get a Telegram message confirming what was logged.
+
+**Logging email receipts:** Set up a Gmail filter to forward receipts to your local email address. The system reads it automatically.
+
+**Crypto trading:** Export your trade history from your exchange as a CSV. Drop it in `~/ai-accountant/inbox/exchanges/[exchange-name]/`. CGT is calculated automatically using the correct method for your country.
+
+**Bank statements:** Export a CSV from your bank (Monzo, Starling, Barclays, HSBC, Revolut all work). Drop it in `~/ai-accountant/inbox/bank-statements/`. It matches transactions against your receipts and flags any gaps.
+
+**Asking questions:** Open Terminal, navigate to your ai-accountant folder, type `claude` and ask anything:
+- *"what do I owe this year?"*
+- *"what can I claim for my home office?"*
+- *"show me my CGT summary"*
+- *"what are my biggest expenses this month?"*
+- *"prepare me for filing"*
+
+**Using your voice:** Install [Wispr Flow](https://wispr.flow) and dictate directly to Claude Code instead of typing.
+
+---
+
+## Frequently Asked Questions
+
+**Do I need to know how to code?**
+No. You paste one thing into a terminal window, answer 8 questions, and it builds itself. After that, you interact with it using normal language.
+
+**Is my financial data safe?**
+Yes. Everything runs on your computer. The only data that leaves your machine is the *text content* of documents (not the files themselves) sent to Anthropic's API for classification, and you consent to this during setup. Your bank details, account numbers, and tax IDs stay on your computer.
+
+**What if something goes wrong during setup?**
+The setup prompt handles errors automatically and tells you exactly what to do if something needs manual attention. Common issues (Node version too old, package install failures, port conflicts) are fixed automatically.
+
+**Can I use this alongside an accountant?**
+Yes — many people use it to keep their records organised and then hand a clean export to their accountant. It dramatically reduces accountant time (and therefore cost).
+
+**What if my country isn't in the pre-built list?**
+Type your country name during setup. Claude will generate a tax adapter using its knowledge of your country's tax law, tell you exactly which values to verify, and wait for your confirmation before using it.
+
+**Does it work if I'm both employed AND self-employed?**
+Yes. You can configure multiple income sources. PAYE employment income is factored into personal allowance calculations.
+
+**What about VAT?**
+VAT tracking is the next major feature. The adapter spec includes VAT fields — the calculation engine is in development. For now, VAT amounts are captured on each transaction.
+
+**I already filed last year — can I import old data?**
+Yes. During or after setup, drop prior-year bank statements and exchange CSVs into the inbox. The system will assign transactions to the correct tax year based on date.
+
+**Does it actually file my taxes for me?**
+It calculates everything and prepares all the data. You still press submit on your tax authority's website (HMRC, IRS, etc.). This takes 20 minutes when all your numbers are already organised. Automated filing is a future feature pending API access from tax authorities.
+
+---
+
+## Supported Banks (automatic CSV parsing)
+
+| Bank | Country | Format |
+|------|---------|--------|
+| Monzo | UK | CSV export |
+| Starling | UK | CSV export |
+| Barclays | UK | CSV export |
+| HSBC | UK | CSV export |
+| Revolut | UK / EU | CSV export |
+| Lloyds | UK | CSV export |
+| NatWest / RBS | UK | CSV export |
+| Chase | US | CSV export |
+| Bank of America | US | CSV export |
+| CommBank | AU | CSV export |
+| Generic CSV | Any | Auto-detect columns |
+
+Any bank not listed: use the Generic CSV adapter. It auto-detects date, description, and amount columns from the header row.
+
+---
+
+## Supported Exchanges (automatic CGT calculation)
+
+Binance, Coinbase, Coinbase Pro, Kraken, Revolut Crypto, Gemini, ByBit, OKX, KuCoin, Bitfinex, Huobi, Gate.io
+
+Don't see yours? The system can parse any CSV if you tell it which columns contain date, asset, side (buy/sell), quantity, price, and fee.
+
+---
+
+## Privacy & Security
+
+- All financial data stored locally in `~/.ai-accountant/data.db` (SQLite, permissions 600 — only your user can read it)
+- API keys stored in `.env` with permissions 600
+- Only document text (not files) sent to Anthropic API for classification — never amounts, names, or tax IDs
+- FX rates fetched from `api.frankfurter.app` — only currency codes and dates sent, nothing financial
+- Telegram messages sent only to your configured chat ID — the bot ignores all other senders
+- No telemetry. No analytics. No phone-home. This is your data on your machine.
 
 ---
 
 ## Contributing
 
-PRs welcome. The highest-value contributions are:
+PRs welcome. Highest-value contributions:
 
-- **Tax adapters** — submit a reviewed `tax-adapters/[country-code].json` for your country. Template at `src/tax-adapters/_template.json`.
-- **Bank adapters** — CSV column mappings for your bank. Currently supported: Monzo, Starling, Barclays, HSBC, Revolut, Chase US, CommBank AU. Add yours in `src/bank-parsers/`.
-- **Exchange parsers** — trade history CSV formats for new exchanges.
-- **VAT/GST support** — the adapter spec includes a `vatThreshold` field; the VAT calculation engine is the next major feature.
+- **Tax adapters** — reviewed JSON for your country. Template: `docs/tax-adapter-template.json`
+- **Bank parsers** — CSV column mappings for your bank. Add to `src/bank-parsers/`
+- **Exchange parsers** — trade history CSV format. Add to `src/exchange-parsers/`
+- **Translations** — setup prompt and output messages in other languages
 
 ---
 
 ## Disclaimer
 
-This tool helps you organise your records and estimates your tax liability. It is not a substitute for professional advice on complex situations. Always verify figures with HMRC / your tax authority before filing.
+This tool helps you organise your financial records and calculate your estimated tax liability. It is not a substitute for professional advice on complex tax situations (IR35 status, international income, inheritance tax, etc.). Always verify your final figures with your tax authority before submitting.
 
 ---
 

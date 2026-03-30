@@ -33,7 +33,7 @@ SELECT category, SUM(deductible_amount) as total FROM transactions
 WHERE type = 'expense' AND tax_year_id = ? GROUP BY category ORDER BY total DESC;
 
 -- CGT summary
-SELECT asset, SUM(gain_loss_gbp) as net_gain FROM cgt_disposals
+SELECT asset, SUM(gain_loss_pence) / 100.0 as net_gain FROM cgt_disposals
 WHERE tax_year_id = ? GROUP BY asset;
 ```
 

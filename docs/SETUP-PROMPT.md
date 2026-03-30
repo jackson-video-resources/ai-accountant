@@ -1856,6 +1856,7 @@ Cross-platform path handling: always use `path.join()`, never string concatenati
 ### src/processor.ts
 
 Document processor. Listens for 'new_document' events from the watcher.
+Import `getFxRate` from `./fx.js` and `parseBankCSV` from `./bank-parsers/index.js`.
 
 For each document:
 1. Update status to 'processing'
@@ -1898,6 +1899,146 @@ For income:
 ```
 
 On error: update status to 'error', store error message, send Telegram alert if critical.
+
+### src/fx.ts
+
+FX rate module. Fetches historical exchange rates from `api.frankfurter.app`.
+
+**SSRF protection:** The API URL is hardcoded — never constructed from user input or config values.
+
+```typescript
+import Database from 'better-sqlite3';
+
+const FRANKFURTER_BASE = 'https://api.frankfurter.app';
+const FETCH_TIMEOUT_MS = 5000;
+const RATE_MIN = 0.000001;
+const RATE_MAX = 100_000;
+
+export interface FxResult {
+  rate: number;
+  source: 'cache' | 'api';
+  date: string; // ISO date actually used (may differ from requested if weekend/holiday)
+}
+
+export async function getFxRate(
+  db: Database.Database,
+  fromCurrency: string,
+  toCurrency: string,
+  date: string // ISO date YYYY-MM-DD
+): Promise<FxResult | null> {
+  // Validate currency codes — 3 uppercase letters only
+  const from = fromCurrency.trim().toUpperCase();
+  const to = toCurrency.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(from) || !/^[A-Z]{3}$/.test(to)) {
+    throw new Error(`Invalid currency code: ${fromCurrency} / ${toCurrency}`);
+  }
+  if (from === to) return { rate: 1, source: 'cache', date };
+
+  // Validate date format
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`Invalid date format: ${date}`);
+  }
+
+  // Check cache first
+  const cached = db.prepare(
+    `SELECT rate, date FROM fx_rates WHERE from_currency = ? AND to_currency = ? AND date = ?`
+  ).get(from, to, date) as { rate: number; date: string } | undefined;
+  if (cached) return { rate: cached.rate, source: 'cache', date: cached.date };
+
+  // Fetch from API
+  // Only currency codes and date are sent — no amounts, no names, no user data
+  const url = `${FRANKFURTER_BASE}/${date}?from=${from}&to=${to}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  let data: { rates: Record<string, number>; date: string };
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null; // e.g. 404 for future dates or unsupported currencies
+    data = await res.json() as typeof data;
+  } catch {
+    return null; // timeout or network error — caller marks transaction needs_fx_rate
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const rate = data?.rates?.[to];
+  const actualDate = data?.date ?? date;
+
+  // Validate the returned rate is a plausible finite number
+  if (!Number.isFinite(rate) || rate < RATE_MIN || rate > RATE_MAX) return null;
+
+  // Cache the result
+  db.prepare(
+    `INSERT OR REPLACE INTO fx_rates (from_currency, to_currency, date, rate) VALUES (?, ?, ?, ?)`
+  ).run(from, to, actualDate, rate);
+
+  return { rate, source: 'api', date: actualDate };
+}
+```
+
+The `fx_rates` table schema is in `database.ts` — do not re-create it here.
+
+### src/bank-parsers/index.ts
+
+Auto-detect bank from CSV headers and parse transactions into a common format.
+Import `sanitizeCSVCell` from `../security.js`.
+
+Apply the same CSV injection protection and numeric field validation as `src/exchange-parsers/index.ts`.
+
+Common output interface:
+```typescript
+interface BankTransaction {
+  date: string;          // ISO 8601
+  description: string;
+  amount: number;        // positive = credit, negative = debit
+  currency: string;      // 3-letter ISO code
+  reference?: string;    // bank's own transaction ID
+  balance?: number;      // running balance if available
+}
+```
+
+Header fingerprints for each bank (detect by checking if headers include ALL required columns):
+```typescript
+const BANK_FINGERPRINTS: Record<string, string[]> = {
+  monzo:        ['Transaction ID', 'Date', 'Time', 'Type', 'Name', 'Emoji', 'Category', 'Amount', 'Currency'],
+  starling:     ['Date', 'Counter Party', 'Reference', 'Type', 'Amount (GBP)', 'Balance (GBP)'],
+  barclays:     ['Number', 'Date', 'Account', 'Amount', 'Subcategory', 'Memo'],
+  hsbc:         ['Date', 'Description', 'Amount', 'Balance'],
+  revolut:      ['Type', 'Product', 'Started Date', 'Completed Date', 'Description', 'Amount', 'Currency', 'State'],
+  lloyds:       ['Transaction Date', 'Transaction Type', 'Sort Code', 'Account Number', 'Transaction Description', 'Debit Amount', 'Credit Amount', 'Balance'],
+  natwest:      ['Date', 'Type', 'Description', 'Value', 'Balance', 'Account Name', 'Account Number', 'Sort Code'],
+  chase_us:     ['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount', 'Memo'],
+  bofa:         ['Date', 'Description', 'Amount', 'Running Bal.'],
+  commbank_au:  ['Date', 'Amount', 'Description', 'Balance'],
+};
+```
+
+Parser behaviour per bank:
+- **Monzo:** Amount column includes sign. Currency column present. Skip pending transactions (Type = 'DECLINED' or State ≠ 'COMPLETE').
+- **Starling:** `Amount (GBP)` — positive is credit. Balance available.
+- **Barclays:** Amount is signed (negative = debit). Memo is description.
+- **HSBC:** Amount is signed. May have a second header row — skip non-date rows.
+- **Revolut:** Use `Completed Date` (not Started Date). Only import `State = 'COMPLETED'` rows. Amount is signed.
+- **Lloyds:** Separate Debit/Credit columns — debit is positive (make negative), credit is positive. Both may be blank.
+- **NatWest:** Value column signed. Sort Code / Account Number always present in each row.
+- **Chase US:** Amount is signed (negative = debit/charge). Skip rows with Type = 'Payment'.
+- **BofA:** Amount is signed. Running balance available.
+- **CommBank AU:** Amount is signed (negative = withdrawal).
+
+**Generic fallback:** If no fingerprint matches, attempt auto-detection:
+1. Find a column whose name contains 'date' (case-insensitive) — use as date column
+2. Find a column whose name contains 'amount' or 'value' — use as amount column
+3. Find a column whose name contains 'description', 'memo', 'narrative', or 'details' — use as description
+4. Parse amounts: handle parentheses for negatives `(100.00)`, strip currency symbols, handle both comma and period as decimal separator
+5. Log: "Detected generic CSV — using auto-detected columns: date=[col], amount=[col], description=[col]. Verify these look correct."
+
+Export a single function:
+```typescript
+export function parseBankCSV(csvText: string, filename: string): BankTransaction[]
+```
+
+Use `papaparse` with `header: true` for parsing.
 
 ### src/exchange-parsers/index.ts
 
@@ -2244,11 +2385,52 @@ Report sections:
 
 Save to `[INSTALL_DIR]/reports/[tax_year]/tax-summary-[date].pdf` and send via Telegram if configured.
 
+### src/scripts/reconcile.ts
+
+Manual reconciliation script. Run with `npm run reconcile`.
+
+Steps:
+1. Load the current open tax year from the database
+2. **Unprocessed files check:** Scan all subdirectories of `inbox/` for files. For each file, check whether a document record exists with that file's SHA-256 hash. Report any files not yet in the database.
+3. **Stuck documents check:** Find documents with `processing_status = 'processing'` older than 1 hour — these are likely crashed mid-process. Reset them to `pending` so the nightly job retries them.
+4. **Unmatched bank transactions:** Find bank statement transactions that have no matched receipt (amount > £25/€25/$25, date > 30 days ago). List them as "missing receipts" to investigate.
+5. **Unclassified transactions:** Find transactions where `category IS NULL OR category = 'unknown'`. List them and prompt: "Run `npm run reconcile -- --reclassify` to re-run AI classification on these."
+6. **FX rate gaps:** Find transactions with `processing_status = 'needs_fx_rate'`. For each, attempt to fetch the rate now. Report how many were resolved vs still missing.
+7. **DLA balance (limited company only):** If `entityType = 'limited_company'`, calculate the current DLA balance. If overdrawn > £10,000 warn: "⚠️ DLA overdrawn by £[amount]. S455 tax will apply if still overdrawn at your year end ([date])."
+8. **CGT recalculation:** Re-run the CGT calculator for the open tax year to ensure all disposals are reflected. Compare to any previously stored CGT summary — report if the total changed.
+9. **Summary:** Print a reconciliation report:
+
+```
+Reconciliation Report — [tax_year] — [timestamp]
+──────────────────────────────────────────────────
+Documents processed:    [count]
+Transactions logged:    [count]
+Unprocessed files:      [count]  ← files in inbox not yet processed
+Missing receipts:       [count]  ← transactions over £25 with no document
+Unclassified:           [count]
+FX rate gaps resolved:  [resolved]/[total]
+
+YTD Income:             £[amount]
+YTD Deductible Exp:     £[amount]
+Net Profit (est.):      £[amount]
+Estimated Tax Due:      £[amount]
+CGT (est.):             £[amount]
+
+Next deadline:          [name] — [date] ([X] days)
+──────────────────────────────────────────────────
+```
+
+10. Write the reconciliation result to `audit_log` with `event_type = 'reconciliation'`.
+
 ---
 
 ## Phase 7: Create PM2 Configuration
 
-Create `[INSTALL_DIR]/ecosystem.config.cjs`:
+Create `[INSTALL_DIR]/ecosystem.config.cjs`. The `out_file` and `error_file` values must be set to the platform null device to prevent PM2 from writing plaintext financial data to log files on disk.
+
+**When writing this file, substitute `NULL_DEVICE` based on `PLATFORM`:**
+- Mac / Linux: `NULL_DEVICE = '/dev/null'`
+- Windows: `NULL_DEVICE = 'NUL'`
 
 ```javascript
 module.exports = {
@@ -2268,8 +2450,8 @@ module.exports = {
     // Logs go to stdout/stderr only — NOT plaintext files.
     // Plaintext log files would contain financial data, amounts, names, tax IDs.
     // PM2's own log capture is disabled; structured JSON goes to the OS journal.
-    out_file: '/dev/null',
-    error_file: '/dev/null',
+    out_file: '[NULL_DEVICE]',
+    error_file: '[NULL_DEVICE]',
     // Application-level logging (src/logger.ts) writes redacted JSON to stdout.
     // To view logs: pm2 logs ai-accountant (streams live stdout/stderr)
     merge_logs: false
