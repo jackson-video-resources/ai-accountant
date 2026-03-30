@@ -353,3 +353,7 @@ This tool helps you organise your financial records and calculate your estimated
 ---
 
 *Built for the [AI Accountant Masterclass](https://youtube.com/@lewisjackson) — free, open source, forever.*
+
+---
+
+*Some links in this README are affiliate links. If you sign up through them, I may earn a small commission at no extra cost to you.*
