@@ -61,7 +61,67 @@ Ask these questions one at a time. Wait for each answer before asking the next. 
   Examples: United Kingdom, Germany, Australia, Canada, India, Singapore, Brazil, UAE..."
 → Store as `COUNTRY_INPUT` (free text). Normalise to ISO 3166-1 country name. Store ISO 3166-1 alpha-2 code as `COUNTRY_CODE` (e.g. "GB", "US", "DE", "AU").
 
-**Q3:** "What's your tax ID number? (e.g. UK UTR, US SSN/EIN, Australian TFN, German Steueridentifikationsnummer). Press Enter to skip for now."
+**Q2b:** "How are you structured? This determines which tax rules apply, what you can claim, and where your biggest savings are.
+
+  1. Sole trader / Freelancer / Self-employed individual
+     (Personal income tax on profits. Simplest setup.)
+
+  2. Limited company / Corporation / LLC
+     (Corporation tax on company profits + personal tax on salary/dividends you take out.
+     Often more tax-efficient above ~£40–50k profit.)
+
+  3. Partnership or LLP
+     (Profits split between partners, each taxed individually on their share.)
+
+  4. I'm not sure — help me decide
+     (I'll ask a few questions and recommend the most tax-efficient structure for your situation.)"
+
+→ Store as `ENTITY_TYPE` (sole_trader / limited_company / partnership / undecided)
+
+**If ENTITY_TYPE = undecided:** Ask these three questions to recommend a structure:
+
+  a) "Roughly what's your annual profit (income minus expenses)?"
+     → Store as `APPROX_PROFIT`
+
+  b) "Do you want limited liability protection? (Means you personally aren't liable if the business owes money)"
+     → Store as `WANTS_LIABILITY_PROTECTION` (yes / no / not sure)
+
+  c) "Are you working alone, or are there other people sharing the profits?"
+     → Store as `IS_SOLO` (yes = solo / no = multiple people)
+
+  Then recommend based on their country and profit level:
+
+  **UK recommendation logic:**
+  - Profit < £30,000 AND no liability concerns → "Sole trader is simpler and the tax difference is small at this level."
+  - Profit £30,000–£50,000 → "Either works — limited company starts to become more efficient here, especially if you don't need all the profit immediately."
+  - Profit > £50,000 → "Limited company will almost certainly save you significant tax. As a director you can take a low salary (~£12,570) and the rest as dividends at 8.75% instead of 40% income tax. The saving can be £5,000–£15,000/year."
+  - Multiple people → "Partnership or LLP if you want simplicity. Ltd company with multiple directors/shareholders if you want flexibility."
+
+  **US recommendation logic:**
+  - Profit < $40,000 → "Sole proprietor or single-member LLC is simplest. Tax difference vs S-Corp is minimal here."
+  - Profit $40,000–$80,000 → "S-Corp election starts to make sense — you pay SE tax only on your salary, not distributions."
+  - Profit > $80,000 → "S-Corp election likely saves $5,000–$15,000/year in SE tax. Requires payroll setup."
+
+  Present the recommendation clearly and let them choose. Store their final choice as `ENTITY_TYPE`.
+
+**If ENTITY_TYPE = limited_company:** Ask:
+
+  **Q2c:** "What's your company name?"
+  → Store as `COMPANY_NAME`
+
+  **Q2d:** "What's your company's financial year end? (e.g. '31 March', '31 December', '30 September'). This is on your incorporation documents or Companies House entry. Press Enter if you don't know yet."
+  → Store as `COMPANY_YEAR_END` (MM-DD format, e.g. "03-31")
+
+  **Q2e (UK only):** "What's your Company Registration Number (CRN)? 8 digits, on your incorporation certificate. Press Enter to skip."
+  → Store as `COMPANY_REG` (optional)
+
+**Q3:** "What's your tax ID number?
+  - Sole trader UK: UTR (10 digits, on HMRC letters)
+  - Ltd company UK: UTR + Company CRN
+  - US individual: SSN or EIN
+  - Australian: TFN (individual) or ABN (business)
+  - Other countries: your equivalent tax reference
+  Press Enter to skip for now."
 → Store as `TAX_ID` (optional, label varies by country)
 
 **Q4:** "Do you have crypto or investment trading activity? (yes / no)"
@@ -92,6 +152,7 @@ Ask these questions one at a time. Wait for each answer before asking the next. 
 Confirm before building: "Perfect. Here's what I'm about to set up:
 - Name: [USER_NAME]
 - Country: [COUNTRY_INPUT] ([COUNTRY_CODE])
+- Entity: [ENTITY_TYPE_LABEL] [COMPANY_NAME if applicable]
 - Crypto tracking: [yes/no]
 - Telegram: [connected/skipped]
 - Install location: [INSTALL_DIR]
@@ -167,6 +228,33 @@ interface TaxAdapter {
   notes?: string;
   generatedByAI: boolean;
   lastVerified: string;  // ISO date
+
+  // Entity-specific rules — present for all entity types that exist in this country
+  entityRules: {
+    soleTrader?: EntityRule;
+    limitedCompany?: EntityRule;
+    partnership?: EntityRule;
+  };
+}
+
+interface EntityRule {
+  label: string;                  // e.g. "Sole Trader", "Limited Company", "SARL"
+  description: string;            // one-line summary
+  taxBase: 'profit' | 'revenue' | 'net_income';
+  taxRates: Array<{ min: number; max: number | null; rate: number; label?: string }>;
+  filingDeadlines: Array<{
+    name: string;
+    description: string;
+    relativeTo: 'fixed_date' | 'year_end';
+    monthsAfterYearEnd?: number;   // for year_end relative deadlines
+    month?: number;                // for fixed_date deadlines
+    day?: number;
+    alertDaysBefore: number[];
+  }>;
+  mainForms: string[];
+  keyOptimizations: string[];     // e.g. ["salary_dividend_split", "directors_pension"]
+  mustRegisterWith?: string;      // e.g. "Companies House", "SEC", "ASIC"
+  notes?: string;
 }
 ```
 
@@ -226,7 +314,87 @@ Write the adapter file to `~/.ai-accountant/tax-adapters/[COUNTRY_CODE].json`.
   "tradingAllowance": 1000,
   "pensionContributionRelief": true,
   "generatedByAI": false,
-  "lastVerified": "2025-03-01"
+  "lastVerified": "2025-03-01",
+  "entityRules": {
+    "soleTrader": {
+      "label": "Sole Trader",
+      "description": "Self-employed individual. Profits taxed as personal income via Self Assessment.",
+      "taxBase": "profit",
+      "taxRates": [
+        { "min": 0, "max": 12570, "rate": 0, "label": "Personal Allowance" },
+        { "min": 12570, "max": 50270, "rate": 0.20, "label": "Basic Rate + Class 4 NI" },
+        { "min": 50270, "max": 125140, "rate": 0.40, "label": "Higher Rate" },
+        { "min": 125140, "max": null, "rate": 0.45, "label": "Additional Rate" }
+      ],
+      "filingDeadlines": [
+        { "name": "Self Assessment (SA100)", "description": "File return and pay all tax due", "relativeTo": "fixed_date", "month": 1, "day": 31, "alertDaysBefore": [90, 60, 30, 14, 7, 1] },
+        { "name": "Payment on Account 2", "description": "Second advance payment toward next year's bill", "relativeTo": "fixed_date", "month": 7, "day": 31, "alertDaysBefore": [30, 14, 7] }
+      ],
+      "mainForms": ["SA100", "SA103F (self-employment)", "SA108 (capital gains)"],
+      "keyOptimizations": [
+        "pension_contributions — reduce taxable profit, attract basic rate relief top-up",
+        "trading_allowance — £1,000 exempt, use if expenses are less",
+        "home_office — £6/week flat rate or room-percentage, whichever higher",
+        "mileage_rate — 45p/mile first 10,000, 25p after (vs actual vehicle costs)",
+        "annual_investment_allowance — 100% first-year deduction on equipment",
+        "loss_relief — trading losses can offset other income or carried forward"
+      ],
+      "notes": "Simplest structure. No separation between business and personal finances legally. Unlimited personal liability."
+    },
+    "limitedCompany": {
+      "label": "Limited Company",
+      "description": "Company pays Corporation Tax on profits. Director takes salary + dividends. Significant NI savings possible.",
+      "taxBase": "profit",
+      "taxRates": [
+        { "min": 0, "max": 50000, "rate": 0.19, "label": "Small Profits Rate" },
+        { "min": 50000, "max": 250000, "rate": "marginal_relief", "label": "Marginal Relief Band (effective ~26.5%)" },
+        { "min": 250000, "max": null, "rate": 0.25, "label": "Main Rate" }
+      ],
+      "filingDeadlines": [
+        { "name": "Corporation Tax payment", "description": "Pay CT due", "relativeTo": "year_end", "monthsAfterYearEnd": 9, "alertDaysBefore": [60, 30, 14, 7] },
+        { "name": "CT600 return", "description": "File corporation tax return with HMRC", "relativeTo": "year_end", "monthsAfterYearEnd": 12, "alertDaysBefore": [60, 30, 14, 7] },
+        { "name": "Annual accounts (Companies House)", "description": "File statutory accounts", "relativeTo": "year_end", "monthsAfterYearEnd": 9, "alertDaysBefore": [60, 30, 14, 7] },
+        { "name": "Confirmation statement", "description": "Annual confirmation to Companies House (£13)", "relativeTo": "fixed_date", "month": 0, "day": 0, "alertDaysBefore": [30, 14], "notes": "Due on anniversary of incorporation" },
+        { "name": "Director Self Assessment", "description": "SA100 for director's personal salary + dividends", "relativeTo": "fixed_date", "month": 1, "day": 31, "alertDaysBefore": [90, 30, 14, 7] }
+      ],
+      "mainForms": ["CT600 (corporation tax)", "SA100 (director personal)", "P60/P11D (PAYE)", "Annual Accounts"],
+      "keyOptimizations": [
+        "salary_dividend_split — pay salary at NI threshold (£12,570), rest as dividends. Dividends taxed at 8.75% (basic) not 20%+NI. Typical saving: £3,000–£8,000/year",
+        "directors_pension — company pays into director pension directly. Reduces CT-liable profit AND avoids dividend tax. Most tax-efficient extraction method at higher profits",
+        "directors_loan_account — track carefully. Overdrawn DLA triggers S455 tax (33.75% of overdrawn amount). Must be repaid within 9 months of year end",
+        "research_and_development — R&D tax credits available for qualifying companies (SME: 186% deduction or 10% cash credit)",
+        "annual_investment_allowance — 100% first-year deduction on plant and machinery up to £1M",
+        "spouse_employment — employ a spouse legitimately at market rate; their salary is a CT-deductible expense",
+        "company_car — electric vehicles attract 2% BIK, very tax efficient vs personal car",
+        "trivial_benefits — up to £50/occasion, £300/year tax-free to directors (gift cards, team meals etc.)",
+        "goodwill_and_ip — if incorporating an existing sole trade, goodwill may be transferable at market value"
+      ],
+      "mustRegisterWith": "Companies House (UK). Annual filing obligations.",
+      "notes": "Year-end is flexible (chosen at incorporation). Changing year-end requires HMRC and Companies House notification. Marginal Relief: for profits between £50k–£250k, effective rate interpolates between 19% and 25%. Formula: CT = profits × 25% − (250,000 − profits) × (250,000 − 50,000) / 250,000 × 3/200."
+    },
+    "partnership": {
+      "label": "Partnership / LLP",
+      "description": "Profits split between partners per agreement. Each partner files Self Assessment on their share.",
+      "taxBase": "profit",
+      "taxRates": [
+        { "min": 0, "max": 12570, "rate": 0, "label": "Per-partner personal allowance" },
+        { "min": 12570, "max": 50270, "rate": 0.20 },
+        { "min": 50270, "max": 125140, "rate": 0.40 },
+        { "min": 125140, "max": null, "rate": 0.45 }
+      ],
+      "filingDeadlines": [
+        { "name": "Partnership Return (SA800)", "description": "Partnership-level return showing profit split", "relativeTo": "fixed_date", "month": 1, "day": 31, "alertDaysBefore": [60, 30, 14, 7] },
+        { "name": "Individual SA100s", "description": "Each partner files personal return including their partnership share", "relativeTo": "fixed_date", "month": 1, "day": 31, "alertDaysBefore": [60, 30, 14, 7] }
+      ],
+      "mainForms": ["SA800 (partnership)", "SA104 (partner supplement)", "SA100 (each partner)"],
+      "keyOptimizations": [
+        "profit_allocation — partnership agreement can allocate profits unevenly; can use lower-earning partner's personal allowance",
+        "spouse_partner — adding a spouse as a partner can split income across two personal allowances",
+        "pension_contributions — each partner can contribute individually to their own pension"
+      ],
+      "notes": "LLP (Limited Liability Partnership) gives partners limited liability while retaining pass-through taxation. Often used by professional firms."
+    }
+  }
 }
 ```
 
@@ -288,7 +456,77 @@ Write the adapter file to `~/.ai-accountant/tax-adapters/[COUNTRY_CODE].json`.
   "pensionContributionRelief": true,
   "notes": "State income tax varies by state (0–13.3%). Configure your state rate separately.",
   "generatedByAI": false,
-  "lastVerified": "2025-03-01"
+  "lastVerified": "2025-03-01",
+  "entityRules": {
+    "soleTrader": {
+      "label": "Sole Proprietor / Single-member LLC",
+      "description": "Business income reported on Schedule C of personal 1040. SE tax at 15.3% on net earnings.",
+      "taxBase": "profit",
+      "taxRates": [
+        { "min": 0, "max": 11600, "rate": 0.10 },
+        { "min": 11600, "max": 47150, "rate": 0.12 },
+        { "min": 47150, "max": 100525, "rate": 0.22 },
+        { "min": 100525, "max": 191950, "rate": 0.24 },
+        { "min": 191950, "max": null, "rate": "see_brackets" }
+      ],
+      "filingDeadlines": [
+        { "name": "Annual Return + Tax Due", "description": "Form 1040 with Schedule C", "relativeTo": "fixed_date", "month": 4, "day": 15, "alertDaysBefore": [90, 60, 30, 14, 7] },
+        { "name": "Q1 Estimated Tax", "relativeTo": "fixed_date", "month": 4, "day": 15, "alertDaysBefore": [14, 7] },
+        { "name": "Q2 Estimated Tax", "relativeTo": "fixed_date", "month": 6, "day": 17, "alertDaysBefore": [14, 7] },
+        { "name": "Q3 Estimated Tax", "relativeTo": "fixed_date", "month": 9, "day": 16, "alertDaysBefore": [14, 7] },
+        { "name": "Q4 Estimated Tax", "relativeTo": "fixed_date", "month": 1, "day": 15, "alertDaysBefore": [14, 7] }
+      ],
+      "mainForms": ["1040", "Schedule C", "Schedule SE"],
+      "keyOptimizations": [
+        "home_office_deduction — simplified ($5/sq ft up to 300 sq ft) or actual expenses method",
+        "qbi_deduction — 20% deduction on qualified business income for pass-through entities (phase-outs apply)",
+        "sep_ira — contribute up to 25% of net self-employment income ($69,000 max 2024)",
+        "solo_401k — higher contribution limits than SEP-IRA if business has no other employees",
+        "health_insurance_deduction — 100% of premiums deductible from income (not just Schedule A)",
+        "vehicle_mileage — $0.67/mile (2024) or actual costs + depreciation",
+        "retirement_account_reduces_agi — reduces both income tax and phase-out thresholds"
+      ]
+    },
+    "limitedCompany": {
+      "label": "S-Corporation / C-Corporation",
+      "description": "S-Corp: pass-through taxation but SE tax only on salary. C-Corp: 21% flat corporate tax. S-Corp often optimal at $80k+ profit.",
+      "taxBase": "profit",
+      "taxRates": [
+        { "min": 0, "max": null, "rate": 0.21, "label": "C-Corp flat rate" },
+        { "min": 0, "max": null, "rate": "s_corp_see_notes", "label": "S-Corp: salary at income rate + SE tax; distributions at capital gains rate" }
+      ],
+      "filingDeadlines": [
+        { "name": "S-Corp 1120-S return", "description": "S-Corp tax return", "relativeTo": "fixed_date", "month": 3, "day": 15, "alertDaysBefore": [60, 30, 14, 7] },
+        { "name": "C-Corp 1120 return", "description": "C-Corp tax return", "relativeTo": "fixed_date", "month": 4, "day": 15, "alertDaysBefore": [60, 30, 14, 7] },
+        { "name": "Payroll deposits", "description": "FICA deposits for officer salary", "relativeTo": "fixed_date", "month": 0, "day": 0, "alertDaysBefore": [7], "notes": "Semi-weekly or monthly depending on payroll size" }
+      ],
+      "mainForms": ["1120-S (S-Corp)", "1120 (C-Corp)", "K-1 (shareholder)", "W-2 (officer salary)"],
+      "keyOptimizations": [
+        "reasonable_salary_optimization — pay yourself a 'reasonable salary' (IRS scrutinises too low); take rest as distributions not subject to SE tax. At $100k profit, saving ~$5,000–$8,000/year",
+        "s_corp_election — LLC can elect S-Corp status. Requires payroll setup (~$500/year) but saves SE tax above ~$40k profit",
+        "defined_benefit_plan — can shelter very large amounts pre-tax for high-earning owners",
+        "Augusta_rule — rent your home to the corporation up to 14 days/year tax-free to you, deductible to company",
+        "accountable_plan — reimburse yourself for home office, vehicle etc. through company without it being income"
+      ],
+      "mustRegisterWith": "State Secretary of State (for LLC/Corp formation) + IRS for EIN",
+      "notes": "S-Corp election requires IRS Form 2553. Must have 'reasonable compensation' for shareholder-employees or IRS may reclassify distributions as wages. Payroll administration required."
+    },
+    "partnership": {
+      "label": "Partnership / Multi-member LLC",
+      "description": "Pass-through entity. Partnership files Form 1065, issues K-1s to each partner. Each partner pays tax on their share.",
+      "taxBase": "profit",
+      "taxRates": [{ "min": 0, "max": null, "rate": "individual_rates_per_partner" }],
+      "filingDeadlines": [
+        { "name": "Form 1065 (partnership return)", "description": "Partnership-level return + K-1 issuance", "relativeTo": "fixed_date", "month": 3, "day": 15, "alertDaysBefore": [60, 30, 14, 7] },
+        { "name": "Individual 1040s", "description": "Each partner's personal return including K-1 income", "relativeTo": "fixed_date", "month": 4, "day": 15, "alertDaysBefore": [30, 14, 7] }
+      ],
+      "mainForms": ["1065", "Schedule K-1", "1040 (each partner)"],
+      "keyOptimizations": [
+        "special_allocations — partnership agreement can allocate income/loss unevenly (must have economic substance)",
+        "guaranteed_payments — partner payments deductible to partnership, taxed as SE income to recipient"
+      ]
+    }
+  }
 }
 ```
 
@@ -1013,7 +1251,12 @@ Create `~/.ai-accountant/config.json` (this is outside the install dir and never
 ```json
 {
   "userName": "[USER_NAME]",
-  "country": "[COUNTRY]",
+  "country": "[COUNTRY_INPUT]",
+  "countryCode": "[COUNTRY_CODE]",
+  "entityType": "[ENTITY_TYPE]",
+  "companyName": "[COMPANY_NAME or null]",
+  "companyYearEnd": "[COMPANY_YEAR_END or null]",
+  "companyRegistration": "[COMPANY_REG or null]",
   "taxId": "[UTR or TAX_ID or null]",
   "hasCrypto": [true/false],
   "exchanges": [EXCHANGES array],
@@ -1048,13 +1291,35 @@ Now generate the full TypeScript source. Create each file below completely. Do n
 
 ### src/config.ts
 
-Load and validate all configuration. Export a typed `Config` object. Read from `.env` and `~/.ai-accountant/config.json`. Include the full UK and US tax constants for 2023-24, 2024-25, and 2025-26 tax years.
+Load and validate all configuration. Export a typed `Config` object. Read from `.env` and `~/.ai-accountant/config.json`.
 
-UK tax constants must include: personalAllowance (12570), personalAllowanceTaperThreshold (100000), basicRateThreshold (50270), higherRateThreshold (125140), basicRate (0.20), higherRate (0.40), additionalRate (0.45), cgtAnnualExemptAmount (3000), cgtBasicRate (0.10), cgtHigherRate (0.20), class2NIWeeklyRate (3.45), class2NISmallProfitsThreshold (12570), class4NILowerProfitsLimit (12570), class4NIUpperProfitsLimit (50270), class4NILowerRate (0.09), class4NIUpperRate (0.02), tradingAllowance (1000), saFilingDeadline ("YYYY-01-31"), poaDeadline1 ("YYYY-01-31"), poaDeadline2 ("YYYY-07-31").
+The Config type must include:
 
-US constants: standardDeduction (14600 single / 29200 married 2024), selfEmploymentTaxRate (0.153), selfEmploymentDeductionRate (0.5), brackets for single and married filing (10/12/22/24/32/35/37%), ltcgBrackets (0/15/20%).
+```typescript
+interface Config {
+  userName: string;
+  country: string;
+  countryCode: string;           // ISO 3166-1 alpha-2
+  entityType: 'sole_trader' | 'limited_company' | 'partnership' | 'undecided';
+  companyName?: string;
+  companyYearEnd?: string;       // "MM-DD" format, e.g. "03-31"
+  companyRegistration?: string;
+  taxId?: string;
+  hasCrypto: boolean;
+  exchanges: string[];
+  installDir: string;
+  dataDir: string;
+  anthropicApiKey: string;
+  telegramBotToken?: string;
+  telegramChatId?: string;
+}
+```
 
-Include a helper `getCurrentTaxYear(country: string): string` that returns the current open tax year label based on today's date.
+Also export:
+- `loadTaxAdapter(countryCode: string): TaxAdapter` — reads from `~/.ai-accountant/tax-adapters/[CC].json`
+- `getEntityRule(adapter: TaxAdapter, entityType: string): EntityRule` — returns the correct entity rule from the adapter
+- `getCurrentTaxYear(adapter: TaxAdapter, companyYearEnd?: string): string` — for sole traders uses fiscal/calendar year based on adapter; for limited companies uses the company's own year end
+- `getNextDeadlines(adapter: TaxAdapter, entityType: string, companyYearEnd?: string): Deadline[]` — returns all upcoming deadlines sorted by date, using relative year-end calculations for companies
 
 ### src/database.ts
 
@@ -1067,18 +1332,71 @@ CREATE TABLE IF NOT EXISTS tax_years (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   year_label TEXT NOT NULL UNIQUE,
   country TEXT NOT NULL,
+  country_code TEXT NOT NULL DEFAULT 'GB',
+  entity_type TEXT NOT NULL DEFAULT 'sole_trader',
   start_date TEXT NOT NULL,
   end_date TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open',
+  -- Sole trader / personal fields
   total_income_pence INTEGER DEFAULT 0,
   total_expenses_pence INTEGER DEFAULT 0,
   taxable_profit_pence INTEGER DEFAULT 0,
   income_tax_due_pence INTEGER DEFAULT 0,
-  ni_due_pence INTEGER DEFAULT 0,
+  self_employment_levy_pence INTEGER DEFAULT 0,
   cgt_due_pence INTEGER DEFAULT 0,
-  total_due_pence INTEGER DEFAULT 0,
+  total_personal_tax_pence INTEGER DEFAULT 0,
+  -- Limited company fields
+  company_income_pence INTEGER DEFAULT 0,
+  company_expenses_pence INTEGER DEFAULT 0,
+  company_profit_pence INTEGER DEFAULT 0,
+  corporation_tax_pence INTEGER DEFAULT 0,
+  director_salary_pence INTEGER DEFAULT 0,
+  director_salary_tax_pence INTEGER DEFAULT 0,
+  dividends_declared_pence INTEGER DEFAULT 0,
+  dividend_tax_pence INTEGER DEFAULT 0,
+  dla_balance_pence INTEGER DEFAULT 0,
+  s455_tax_risk_pence INTEGER DEFAULT 0,
+  total_combined_tax_pence INTEGER DEFAULT 0,
+  -- Common
   last_calculated_at TEXT,
   filed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Directors Loan Account ledger (limited company only)
+CREATE TABLE IF NOT EXISTS dla_transactions (
+  id TEXT PRIMARY KEY,
+  tax_year_id INTEGER REFERENCES tax_years(id),
+  date TEXT NOT NULL,
+  amount_pence INTEGER NOT NULL,  -- positive = company lends to director, negative = director repays
+  description TEXT,
+  transaction_id TEXT REFERENCES transactions(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Dividend declarations (limited company only)
+CREATE TABLE IF NOT EXISTS dividends (
+  id TEXT PRIMARY KEY,
+  tax_year_id INTEGER REFERENCES tax_years(id),
+  declaration_date TEXT NOT NULL,
+  payment_date TEXT NOT NULL,
+  amount_per_share_pence INTEGER NOT NULL,
+  shares_held INTEGER NOT NULL,
+  total_amount_pence INTEGER NOT NULL,
+  recipient TEXT,  -- director name or 'all shareholders'
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Partner profit shares (partnership only)
+CREATE TABLE IF NOT EXISTS partner_shares (
+  id TEXT PRIMARY KEY,
+  tax_year_id INTEGER REFERENCES tax_years(id),
+  partner_name TEXT NOT NULL,
+  partner_tax_id TEXT,
+  profit_share_percentage REAL NOT NULL,
+  profit_share_pence INTEGER,
+  personal_tax_calculated INTEGER DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1339,59 +1657,116 @@ After processing all trades for a tax year:
 
 ### src/tax-engine.ts
 
-UK Self Assessment calculation engine.
+Entity-aware tax calculation engine. The calculation path branches based on `entityType`.
 
 ```typescript
 interface TaxCalculation {
   taxYear: string;
-  grossIncome: number;        // pence
-  allowableExpenses: number;  // pence
-  tradingProfit: number;      // pence
-  personalAllowance: number;  // pence (may be tapered)
-  taxableIncome: number;      // pence
-  basicRateTax: number;       // pence
-  higherRateTax: number;      // pence
-  additionalRateTax: number;  // pence
-  totalIncomeTax: number;     // pence
-  class2NI: number;           // pence
-  class4NI: number;           // pence
-  totalNI: number;            // pence
-  cgtGain: number;            // pence
-  cgtExemptUsed: number;      // pence
-  cgtTaxable: number;         // pence
-  cgtDue: number;             // pence
-  totalTaxDue: number;        // pence
-  paymentOnAccount1: number;  // pence
-  paymentOnAccount2: number;  // pence
-  balancingPayment: number;   // pence
-  effectiveTaxRate: number;   // percentage
-  marginRate: number;         // percentage (marginal rate at current income)
+  entityType: 'sole_trader' | 'limited_company' | 'partnership';
+  currency: string;
+
+  // — Sole trader / partnership fields —
+  grossIncome: number;                    // smallest unit (pence/cents)
+  allowableExpenses: number;
+  tradingProfit: number;
+  personalAllowance: number;             // may be tapered
+  taxableIncome: number;
+  incomeTaxBreakdown: Array<{ band: string; amount: number; rate: number; tax: number }>;
+  totalIncomeTax: number;
+  selfEmploymentLevy: number;            // NI (UK) / SE tax (US) / social contributions (other)
+  selfEmploymentLevyBreakdown: Array<{ name: string; amount: number }>;
+  cgtGain: number;
+  cgtExemptUsed: number;
+  cgtTaxable: number;
+  cgtDue: number;
+  totalTaxDue: number;
+  paymentOnAccount1: number;
+  paymentOnAccount2: number;
+  balancingPayment: number;
+  effectiveTaxRate: number;
+  marginalRate: number;
+
+  // — Limited company fields —
+  companyProfit?: number;
+  corporationTax?: number;
+  corporationTaxRate?: number;            // small profits / main rate / marginal
+  marginalReliefApplied?: number;
+  directorSalary?: number;
+  directorSalaryTax?: number;
+  directorSalaryNI?: number;
+  dividendsDeclared?: number;
+  dividendTax?: number;
+  directorsLoanAccountBalance?: number;
+  s455TaxRisk?: number;                   // 33.75% if DLA overdrawn at year end
+  totalCompanyTaxBurden?: number;         // CT + director personal tax + NI combined
+  optimalSalaryDividendSplit?: {
+    recommendedSalary: number;
+    recommendedDividends: number;
+    estimatedTaxSaving: number;
+    vs_current: number;
+  };
 }
 ```
 
-The calculation must:
-1. Taper personal allowance correctly if adjusted net income > £100,000
-2. Calculate POA only if total tax > £1,000 AND less than 80% was collected at source
-3. Store results back to `tax_years` table
-4. Log to audit_log with full breakdown as JSON
+**Sole trader calculation:**
+1. Sum income and allowable expenses → trading profit
+2. Taper personal allowance if ANI > taper threshold (read from adapter)
+3. Apply income tax brackets from `entityRule.taxRates`
+4. Apply self-employment levy components from `selfEmploymentLevy`
+5. Add CGT (from cgt-calculator.ts)
+6. Calculate payment on account if applicable
+7. Store to `tax_years`, log to audit_log
 
-Also build a US equivalent: `calculateUSTax()` using Schedule C (self-employment income minus expenses = net profit → SE tax at 15.3% → half SE tax deducted → apply standard deduction → apply federal brackets → state tax placeholder).
+**Limited company calculation:**
+1. Sum company income and company expenses → company profit
+2. Apply corporation tax from `entityRule.taxRates` (including marginal relief if applicable)
+   - UK marginal relief formula: CT = profit × 25% − (250,000 − profit) × (250,000 − 50,000) / 250,000 × 3/200
+3. Separately calculate director's personal tax:
+   - Income tax on salary using personal brackets
+   - Employer + employee NI on salary
+   - Dividend tax on dividends (8.75% basic / 33.75% higher / 39.35% additional in UK)
+4. Check DLA balance — if overdrawn, calculate S455 tax risk
+5. Calculate `optimalSalaryDividendSplit`:
+   - Iterate salary from £0 to £50,270 in £1,000 steps
+   - For each salary: calculate total tax burden (CT + income tax + NI + dividend tax)
+   - Find the salary that minimises total tax burden
+   - Return the optimal split with estimated saving vs current setup
+6. Return combined `TaxCalculation` with both company and personal figures
+
+**Partnership calculation:**
+1. Determine each partner's profit share (from `partnerShares` in config)
+2. Run sole-trader calculation for each partner on their share
+3. Return aggregate + per-partner breakdown
 
 ### src/optimizations.ts
 
-Analyze current year data and return actionable suggestions.
+Entity-aware optimization engine. Load entity type and run the appropriate checks.
 
-Check for:
-1. **Unused CGT allowance** — if remaining CGT annual exempt > 0, suggest realising gains before tax year end
-2. **Personal allowance taper** — if profit is between £100k and £125,140, suggest pension contributions to restore allowance (calculate exact saving)
-3. **Pension contributions** — if no pension contributions recorded, calculate how much basic rate relief they're missing
-4. **Home office** — if no home_office expenses and there are software/equipment expenses (suggesting WFH activity), prompt them to claim
-5. **Mileage vs actual** — if travel expenses recorded, check if mileage rate would be more beneficial
-6. **Missing receipts** — count transactions over £25 without documents
-7. **ISA headroom** — if in UK and near tax year end, remind about £20,000 ISA allowance (for investment income reduction)
-8. **Payment on account warning** — if this will be their first POA year, warn them prominently
+**All entity types:**
+1. **Unused CGT allowance** — remaining exempt amount, suggest realising gains before year end
+2. **Missing receipts** — transactions over £25/€25/$25 without attached document
+3. **Pension contributions** — calculate maximum tax-efficient contribution and saving
+4. **Crypto classification gaps** — disposals without cost basis data
 
-Return array of `Optimization` objects sorted by estimated saving descending.
+**Sole trader specific:**
+5. **Personal allowance taper** — if profit £100k–£125,140 (UK), calculate pension contribution to restore allowance
+6. **Home office** — if WFH likely (software expenses present, no home_office claim) → calculate both methods and suggest higher
+7. **Mileage vs actual** — compare claimed amount to HMRC mileage rate and flag if mileage rate would be better
+8. **ISA headroom** — remind near tax year end
+9. **Payment on account warning** — first year: explain POA clearly with amounts and dates
+10. **Structure review trigger** — if profit > £40,000 (UK) or $40,000 (US): "Your profit has crossed the threshold where a limited company could save you tax. Want me to run a comparison?"
+
+**Limited company specific:**
+5. **Salary/dividend split** — always calculate and show: "Your current split costs £X in tax. The optimal split saves you £Y."
+6. **Director pension** — "A company pension contribution of £X would reduce your Corporation Tax bill by £Y and avoid dividend tax entirely on that amount"
+7. **DLA warning** — if DLA overdrawn: "Your Directors Loan Account is overdrawn by £X. If not repaid before [year_end + 9 months], HMRC will charge 33.75% Section 455 tax (£Y)"
+8. **Trivial benefits** — flag unused £300/year tax-free benefit allowance
+9. **Spouse employment** — if no wages expense: "Employing a spouse at market rate for legitimate work reduces CT and uses their personal allowance"
+10. **R&D tax credits** — if software/tech expenses significant: "Your development costs may qualify for R&D tax credits"
+11. **Pre-year-end profit extraction** — 30 days before year end: "You have £X in the company. Consider declaring a dividend before year end — next year's dividend tax may be higher/you may move into a higher band"
+
+**Partnership specific:**
+5. **Profit allocation review** — check if rebalancing allocation across partners would reduce total tax burden (using their respective personal positions)
 
 ### src/telegram-bot.ts
 

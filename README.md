@@ -13,8 +13,9 @@ No cloud. No subscription. No £150/hr accountant. Just Claude Code and a folder
 - **Watches your inbox folder** — drop any receipt, invoice, or bank statement in and it gets processed automatically
 - **Reads your emails** — forward receipts to a local address and they're filed instantly
 - **Imports exchange CSVs** — drop a Binance, Coinbase or Kraken export and it calculates your CGT using the correct pooling method
-- **Calculates your taxes** — income tax, NI (Class 2 + 4), capital gains, deductions, payments on account
-- **Finds tax savings** — suggests pension contributions, home office claims, CGT allowance usage, and more
+- **Knows your structure** — sole trader, limited company, or partnership. Different rules, different optimizations, different filing deadlines. You tell it what you are (or it helps you decide).
+- **Calculates your taxes** — income tax, corporation tax, NI/SE levy, capital gains, salary/dividend splits, director loan account, payments on account
+- **Finds tax savings** — suggests the optimal salary/dividend split, pension contributions, home office, CGT allowance, R&D credits, spouse employment, and more — all specific to your entity type
 - **Alerts you on Telegram** — weekly summaries, deadline warnings at 90/30/7/1 days, and a "confirm to run" button at filing time
 - **Remembers everything** — all data lives in a local SQLite database that Claude can query in plain English
 

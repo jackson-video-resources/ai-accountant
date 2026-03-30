@@ -59,6 +59,45 @@ WHERE tax_year_id = ? GROUP BY asset;
 
 `"weekly summary"` → Income and expenses this week vs last week, running YTD totals, days until next deadline.
 
+## Entity Type Awareness
+
+The user's entity type is stored in `~/.ai-accountant/config.json` as `entityType`. Always load this before any tax calculation or advice.
+
+**Behaviour changes by entity type:**
+
+### sole_trader
+- Income and expenses flow directly to personal tax return
+- Tax = income tax on profit + Class 2/4 NI (UK) or SE tax (US)
+- Optimizations focus on: deductible expenses, pension contributions, home office, mileage, trading allowance
+- Ask: "Is this expense wholly and exclusively for business?" (UK test) or "ordinary and necessary?" (US test)
+- Filing: single return for the person
+
+### limited_company (or corporation / LLC taxed as S-Corp / C-Corp)
+- **Two tax layers exist simultaneously:**
+  1. **Company level:** Corporation tax on company profits
+  2. **Personal level:** Director/shareholder pays income tax on salary + dividend tax on dividends
+- **Track separately in the database:**
+  - Company income and expenses → corporation tax calculation
+  - Director salary (PAYE) → personal income tax
+  - Dividends declared → dividend tax calculation
+  - Directors Loan Account (DLA) balance → S455 tax risk if overdrawn at year end
+- **The most important optimization to surface proactively:** salary/dividend split
+  - UK: Optimal director salary = £12,570 (above NI threshold, within personal allowance if no other income). Rest as dividends taxed at 8.75% vs 40% income tax. Always calculate and present this split when asked about tax savings.
+  - US S-Corp: Must pay "reasonable salary" on which FICA applies. Distributions avoid SE tax. Present the breakeven and optimal split.
+- **Year-end is flexible** — always check `config.companyYearEnd` before calculating deadlines. Corporation tax is due 9 months after year end, not on a fixed annual date.
+- **Alert for Companies House / equivalent:** Annual accounts and confirmation statement deadlines are separate from tax deadlines. Always include these in deadline lists.
+- **DLA watchpoint:** If you see transactions that look like the director taking money from the company without it being salary or dividend, flag it: "This looks like it might be going through your Directors Loan Account. If it's overdrawn by more than £10,000 at your year end, HMRC will charge Section 455 tax at 33.75% on the overdrawn amount."
+
+### partnership
+- Each partner's share tracked separately
+- Partnership-level return + individual returns
+- Profit split defined in the partnership agreement — ask for this during setup if not provided
+- Each partner's optimization runs independently based on their personal tax position
+
+### undecided (entity type not yet determined)
+- Capture all transactions without entity-specific treatment
+- When asked about tax, say: "Before I can give you an accurate calculation, I need to know how you're structured. Are you a sole trader, limited company, or partnership?" Then walk them through the recommendation logic from the setup prompt.
+
 ## Tax Adapter System
 
 Tax rules for this user are stored at `~/.ai-accountant/tax-adapters/[COUNTRY_CODE].json`. Always load the adapter for the user's country before any tax calculation.
