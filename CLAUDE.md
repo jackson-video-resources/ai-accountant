@@ -179,6 +179,24 @@ npm run report
 npm run health
 ```
 
+## Security Rules
+
+**Never log sensitive data.** The logger redacts amounts, UTRs, API keys, and NI numbers automatically. Do not write raw financial values to console.log — always use `logger` from `src/logger.ts`.
+
+**Never send user data to external services** except:
+- Anthropic API: sanitized document text only (via `sanitizeForLLM()`)
+- `api.frankfurter.app`: currency code and date only — no amounts, no names
+- CoinGecko API: asset symbol and date only
+- Telegram: to the configured `TELEGRAM_CHAT_ID` only
+
+**Never trust file inputs.** Every file entering the system goes through the watcher's security checks (symlink rejection, path containment, size limit, extension allowlist). If you're asked to process a file directly, apply the same checks manually.
+
+**Never use string concatenation to build file paths.** Always `path.join()`. Always call `assertPathUnder()` before reading or writing to confirm the path hasn't been manipulated.
+
+**Never calculate tax using an AI-generated adapter that has `awaitingUserVerification: true`.** If you detect this flag, tell the user: "Your [country] tax adapter hasn't been verified yet. Please review `~/.ai-accountant/tax-adapters/[CC].json` against [authority URL] and then tell me 'I've reviewed the [country] tax adapter — activate it'."
+
+**If a user activates an AI-generated adapter**, set `awaitingUserVerification: false` in the JSON file and confirm: "Tax adapter activated. I'll use these rates for calculations. If you find errors later, edit the file or tell me to update a specific value."
+
 ## What Never To Do
 
 - Never delete transaction records — mark as `void` with a reason
@@ -187,3 +205,5 @@ npm run health
 - Never store API keys in source files — always `.env` or `config.json`
 - Never process a file that has already been processed (check file hash first)
 - Never assume a FX rate if one is not available — flag the transaction as needing review
+- Never follow symlinks when reading files — always use `fs.lstatSync()` first
+- Never accept a CSV cell that starts with `=`, `+`, `-`, `@` without sanitising it first
