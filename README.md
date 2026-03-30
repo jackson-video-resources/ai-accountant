@@ -25,7 +25,7 @@ Everything runs locally. Your financial data never leaves your computer.
 
 ## Before You Start — What You Need
 
-You need **4 things**. Each one takes about 2 minutes to set up.
+You need **4 things** (plus an optional 5th if you want the web dashboard). Each one takes about 2 minutes to set up.
 
 ### 1. Node.js (the engine that runs the system)
 
@@ -84,16 +84,17 @@ On **Windows:** Open Command Prompt or PowerShell, type `claude`, press Enter.
 
 Go to **[docs/SETUP-PROMPT.md](docs/SETUP-PROMPT.md)** on GitHub. Click the **copy** button (top-right of the file). The entire contents are now in your clipboard.
 
-### Step 3 — Paste and answer 8 questions
+### Step 3 — Paste and answer up to 9 questions
 
 Paste into Claude Code and press Enter. It will:
 1. Check your machine is ready
-2. Ask you 8 questions (name, country, structure, crypto, API key, Telegram)
+2. Ask you up to 9 questions (name, country, structure, crypto, API key, Telegram, JaxTax web dashboard)
 3. Build your entire accountancy system automatically
-4. Run a test to confirm everything works
-5. Show you a live summary
+4. Optionally install the JaxTax web dashboard if you chose it
+5. Run a test to confirm everything works
+6. Show you a live summary
 
-**Total time: about 12 minutes.** Most of that is package installation running in the background.
+**Total time: about 12–18 minutes.** Most of that is package installation running in the background. Add ~5 minutes if you install JaxTax.
 
 ---
 
@@ -103,6 +104,7 @@ Paste into Claude Code and press Enter. It will:
 ~/ai-accountant/
 ├── inbox/
 │   ├── receipts/          ← drop any receipt or invoice PDF/image here
+│   │                         (JaxTax uploads also land here automatically)
 │   ├── invoices-sent/     ← your outgoing invoices to clients
 │   ├── bank-statements/   ← CSV or PDF bank exports
 │   └── exchanges/
@@ -112,18 +114,17 @@ Paste into Claude Code and press Enter. It will:
 │       └── ...
 ├── processed/             ← files move here after processing
 ├── reports/               ← generated tax summaries and PDFs
-└── exports/               ← accountant-ready document packs
+├── exports/               ← accountant-ready document packs
+└── jaxtax/                ← JaxTax web dashboard (if installed)
 ```
 
-Behind the scenes: a full TypeScript application with a file watcher, OCR engine, AI classifier, CGT calculator, tax engine, Telegram bot, and deadline scheduler — all running silently in the background via PM2.
+Behind the scenes: a full TypeScript application with a file watcher, OCR engine, AI classifier, CGT calculator, tax engine, Telegram bot, and deadline scheduler — all running silently in the background via PM2. If you install JaxTax, a Next.js web server runs alongside it on port 7331.
 
 ---
 
 ## JaxTax — The Optional Web Dashboard
 
-During setup, you can choose to install **JaxTax** — a browser-based interface for uploading and reviewing documents.
-
-![JaxTax runs at http://localhost:7331]
+During setup, you can choose to install **JaxTax** — a browser-based interface for uploading and reviewing documents. It runs at `http://localhost:7331`.
 
 **What JaxTax adds:**
 - Upload receipts, invoices, and photos from your browser — no folder drag-and-drop needed
@@ -233,7 +234,7 @@ Pre-built tax adapters for 30+ countries. For any other country, the system gene
 
 ## After Setup — How to Use It Day-to-Day
 
-**Logging expenses:** Drop the PDF or photo into `~/ai-accountant/inbox/receipts/`. Done. Within 20 seconds you'll get a Telegram message confirming what was logged.
+**Logging expenses:** Drop the PDF or photo into `~/ai-accountant/inbox/receipts/`. Done. Within 20 seconds you'll get a Telegram message confirming what was logged. Or, if you have JaxTax installed, upload through your browser at `http://localhost:7331` — the file lands in the same place automatically.
 
 **Logging email receipts:** Set up a Gmail filter to forward receipts to your local email address. The system reads it automatically.
 
@@ -255,7 +256,7 @@ Pre-built tax adapters for 30+ countries. For any other country, the system gene
 ## Frequently Asked Questions
 
 **Do I need to know how to code?**
-No. You paste one thing into a terminal window, answer 8 questions, and it builds itself. After that, you interact with it using normal language.
+No. You paste one thing into a terminal window, answer up to 9 questions, and it builds itself. After that, you interact with it using normal language.
 
 **Is my financial data safe?**
 Yes. Everything runs on your computer. The only data that leaves your machine is the *text content* of documents (not the files themselves) sent to Anthropic's API for classification, and you consent to this during setup. Your bank details, account numbers, and tax IDs stay on your computer.
@@ -328,6 +329,8 @@ No — it adds to it. Files uploaded through JaxTax land in the same `inbox/rece
 - Only document text (not files) sent to Anthropic API for classification — never amounts, names, or tax IDs
 - FX rates fetched from `api.frankfurter.app` — only currency codes and dates sent, nothing financial
 - Telegram messages sent only to your configured chat ID — the bot ignores all other senders
+- JaxTax (if installed) stores its own transaction database in a local Docker PostgreSQL container — never leaves your machine
+- JaxTax's AI extraction also runs through your Anthropic API key — the same privacy model applies
 - No telemetry. No analytics. No phone-home. This is your data on your machine.
 
 ---
