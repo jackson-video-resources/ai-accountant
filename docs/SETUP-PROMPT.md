@@ -227,6 +227,7 @@ interface TaxAdapter {
   pensionContributionRelief?: boolean;
   notes?: string;
   generatedByAI: boolean;
+  awaitingUserVerification?: boolean;  // true for AI-generated adapters until user confirms rates
   lastVerified: string;  // ISO date
 
   // Entity-specific rules — present for all entity types that exist in this country
@@ -1691,7 +1692,7 @@ CREATE TABLE IF NOT EXISTS documents (
   ocr_text TEXT,
   claude_classification TEXT,
   processing_status TEXT NOT NULL DEFAULT 'pending'
-    CHECK(processing_status IN ('pending','processing','done','error','needs_review')),
+    CHECK(processing_status IN ('pending','processing','done','error','needs_fx_rate','needs_review')),
   error_message TEXT,
   processed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -2043,7 +2044,7 @@ Use `papaparse` with `header: true` for parsing.
 ### src/exchange-parsers/index.ts
 
 Auto-detect exchange type from CSV headers. Load parsers for each exchange.
-Import `sanitizeCSVCell` from `./security.js`.
+Import `sanitizeCSVCell` from `'../security.js'`.
 
 **CSV injection protection:** Every string cell value parsed from any CSV must pass through `sanitizeCSVCell(value)` before being stored. This neutralises formula injection (`=CMD()`, `@SUM()`, etc.) that could execute in spreadsheet software when the user opens generated reports.
 
@@ -2279,7 +2280,7 @@ const jobs = [
 
 Nightly reconciliation:
 1. Find all files in `inbox/` that haven't been processed (failsafe for files the watcher missed)
-2. Find transactions with `processing_status = 'pending'`
+2. Find documents with `processing_status = 'pending'` (missed by the watcher)
 3. Run them through the processor
 4. Log results to audit_log
 
@@ -2357,6 +2358,20 @@ Startup summary format:
 Ask me anything: "what do I owe?", "what can I claim for X?", "cgt summary"
 ```
 
+### src/scripts/migrate.ts
+
+Run database migrations. Safe to run multiple times — all operations are idempotent.
+
+Steps:
+1. Open the database connection using `initDatabase()` from `../database.js`
+2. Run all `CREATE TABLE IF NOT EXISTS` statements (they're already idempotent by nature)
+3. Run any `ALTER TABLE ADD COLUMN IF NOT EXISTS` statements needed for schema upgrades
+4. Seed the current and previous tax year records if they don't already exist
+5. Print: "Database migration complete. Schema is up to date."
+6. Exit 0
+
+This is called during first setup and can be run again safely after upgrades.
+
 ### src/scripts/health-check.ts
 
 Run a quick health check:
@@ -2395,7 +2410,7 @@ Steps:
 3. **Stuck documents check:** Find documents with `processing_status = 'processing'` older than 1 hour — these are likely crashed mid-process. Reset them to `pending` so the nightly job retries them.
 4. **Unmatched bank transactions:** Find bank statement transactions that have no matched receipt (amount > £25/€25/$25, date > 30 days ago). List them as "missing receipts" to investigate.
 5. **Unclassified transactions:** Find transactions where `category IS NULL OR category = 'unknown'`. List them and prompt: "Run `npm run reconcile -- --reclassify` to re-run AI classification on these."
-6. **FX rate gaps:** Find transactions with `processing_status = 'needs_fx_rate'`. For each, attempt to fetch the rate now. Report how many were resolved vs still missing.
+6. **FX rate gaps:** Find documents with `processing_status = 'needs_fx_rate'`. For each, attempt to fetch the FX rate now using `getFxRate()`. If successful, update the linked transaction's `exchange_rate` and `amount_pence`, set the document's `processing_status` back to `'done'`. Report how many were resolved vs still missing.
 7. **DLA balance (limited company only):** If `entityType = 'limited_company'`, calculate the current DLA balance. If overdrawn > £10,000 warn: "⚠️ DLA overdrawn by £[amount]. S455 tax will apply if still overdrawn at your year end ([date])."
 8. **CGT recalculation:** Re-run the CGT calculator for the open tax year to ensure all disposals are reflected. Compare to any previously stored CGT summary — report if the total changed.
 9. **Summary:** Print a reconciliation report:
@@ -2420,7 +2435,7 @@ Next deadline:          [name] — [date] ([X] days)
 ──────────────────────────────────────────────────
 ```
 
-10. Write the reconciliation result to `audit_log` with `event_type = 'reconciliation'`.
+10. Write the reconciliation result to `audit_log` with `action = 'reconciliation'`, `entity_type = 'system'`, `details = JSON.stringify(summary)`, `triggered_by = 'manual'`.
 
 ---
 
