@@ -1170,6 +1170,14 @@ Create the following directory structure. Use `mkdir -p` for each path.
 └── exports/
 ```
 
+Also create these directories under `~/.ai-accountant/` (the data directory, separate from the install directory):
+```
+~/.ai-accountant/
+├── tax-adapters/
+├── exchange-column-maps/   ← cached AI-detected column mappings for exchange CSVs
+└── bank-column-maps/       ← cached AI-detected column mappings for bank CSVs
+```
+
 Also create the hidden data directory:
 ```
 ~/.ai-accountant/
@@ -2027,12 +2035,35 @@ Parser behaviour per bank:
 - **BofA:** Amount is signed. Running balance available.
 - **CommBank AU:** Amount is signed (negative = withdrawal).
 
-**Generic fallback:** If no fingerprint matches, attempt auto-detection:
-1. Find a column whose name contains 'date' (case-insensitive) — use as date column
-2. Find a column whose name contains 'amount' or 'value' — use as amount column
-3. Find a column whose name contains 'description', 'memo', 'narrative', or 'details' — use as description
-4. Parse amounts: handle parentheses for negatives `(100.00)`, strip currency symbols, handle both comma and period as decimal separator
-5. Log: "Detected generic CSV — using auto-detected columns: date=[col], amount=[col], description=[col]. Verify these look correct."
+**Generic fallback — AI column detection:**
+If no bank fingerprint matches, call the Anthropic API with a focused prompt:
+
+```typescript
+const bankColumnPrompt = `You are parsing a bank statement CSV export.
+
+The CSV has these column headers:
+${JSON.stringify(actualHeaders)}
+
+Here is one sample data row:
+${JSON.stringify(sampleRow)}
+
+Map the columns to these fields. Respond with ONLY a JSON object, no explanation:
+{
+  "date": "<column name containing the transaction date>",
+  "description": "<column name containing the transaction description or merchant name>",
+  "amount": "<column name containing the transaction amount — if debit and credit are separate columns, use 'DEBIT:[col1],CREDIT:[col2]'>",
+  "balance": "<column name containing the running balance, or null>",
+  "reference": "<column name containing the bank reference or transaction ID, or null>",
+  "currency": "<column name containing the currency, or null if only one currency>",
+  "notes": "<any important formatting notes, e.g. 'negative amounts are debits', 'amounts use comma as decimal', or null>"
+}`;
+```
+
+Validate that at minimum `date` and `amount` are mapped. Parse amounts with the formatting described in `notes` — handle parentheses for negatives `(100.00)`, strip currency symbols, handle both comma and period as decimal separator.
+
+Cache the mapping to `~/.ai-accountant/bank-column-maps/[filename-hash].json` so re-imports of the same bank's format don't trigger another API call.
+
+Notify the user: "Detected new bank format — auto-mapped columns. First 3 transactions: [show them]. If these look wrong, tell me which column is the amount/date/description."
 
 Export a single function:
 ```typescript
@@ -2057,16 +2088,60 @@ If any required numeric field fails validation, log a warning with the row numbe
 
 **Exchange transaction ID sanitisation:** Strip all characters except `[a-zA-Z0-9\-_]` from the exchange's own transaction IDs before storing them.
 
-Header fingerprints:
+**Detection strategy — two tiers:**
+
+**Tier 1 — Known exchange fingerprints (fast path, no API call):**
+Try to match the CSV headers against these known patterns. Match is successful if ALL listed columns are present (headers are compared case-insensitively after trimming).
 ```typescript
-const EXCHANGE_HEADERS: Record<string, string[]> = {
-  binance: ['Date(UTC)', 'Pair', 'Side', 'Price', 'Executed', 'Amount', 'Fee'],
-  coinbase: ['Timestamp', 'Transaction Type', 'Asset', 'Quantity Transacted', 'Price Currency'],
-  kraken: ['txid', 'ordertxid', 'pair', 'time', 'type', 'ordertype', 'price', 'cost', 'fee', 'vol'],
-  revolut: ['Type', 'Product', 'Started Date', 'Completed Date', 'Description', 'Amount', 'Currency'],
-  gemini: ['Date', 'Time (UTC)', 'Type', 'Symbol', 'Specification', 'Liquidity Indicator', 'Trading Fee Currency', 'Trading Fee Amount', 'USD Amount'],
+const EXCHANGE_FINGERPRINTS: Record<string, string[]> = {
+  binance:      ['Date(UTC)', 'Pair', 'Side', 'Price', 'Executed', 'Amount', 'Fee'],
+  coinbase:     ['Timestamp', 'Transaction Type', 'Asset', 'Quantity Transacted', 'Price Currency'],
+  coinbase_pro: ['portfolio', 'trade id', 'product', 'side', 'created at', 'size', 'size unit', 'price', 'fee'],
+  kraken:       ['txid', 'ordertxid', 'pair', 'time', 'type', 'ordertype', 'price', 'cost', 'fee', 'vol'],
+  revolut:      ['Type', 'Product', 'Started Date', 'Completed Date', 'Description', 'Amount', 'Currency'],
+  gemini:       ['Date', 'Time (UTC)', 'Type', 'Symbol', 'Specification', 'Trading Fee Amount', 'USD Amount'],
+  bybit:        ['Order ID', 'Trade ID', 'Symbol', 'Side', 'Order Price', 'Order Qty', 'Exec Price', 'Exec Qty', 'Exec Fee'],
+  okx:          ['Order ID', 'Trade ID', 'Instrument', 'Trade side', 'Fill price', 'Fill size', 'Fee'],
+  kucoin:       ['tradeCreatedAt', 'orderId', 'symbol', 'side', 'price', 'size', 'funds', 'fee', 'feeCurrency'],
 };
 ```
+
+If a fingerprint matches, use the hardcoded column mapping for that exchange to parse the Trade fields.
+
+**Tier 2 — AI column detection (any other exchange or changed format):**
+If no fingerprint matches, call the Anthropic API with a focused, structured prompt:
+
+```typescript
+const columnMappingPrompt = `You are parsing a cryptocurrency exchange trade history CSV.
+
+The CSV has these column headers:
+${JSON.stringify(actualHeaders)}
+
+Here is one sample data row:
+${JSON.stringify(sampleRow)}
+
+Map the columns to these fields. Respond with ONLY a JSON object, no explanation:
+{
+  "date": "<column name containing the trade timestamp>",
+  "asset": "<column name containing the base asset symbol, e.g. BTC>",
+  "quoteCurrency": "<column name or null if embedded in asset pair>",
+  "side": "<column name containing buy/sell direction>",
+  "quantity": "<column name containing the amount of base asset traded>",
+  "price": "<column name containing the price per unit>",
+  "fee": "<column name containing the trading fee>",
+  "feeAsset": "<column name containing fee currency, or null>",
+  "orderId": "<column name containing the exchange order/trade ID, or null>",
+  "notes": "<any important formatting notes, e.g. 'asset and quote are combined in BTCUSDT format', or null>"
+}
+
+If a field cannot be determined, use null.`;
+```
+
+Parse the JSON response. Validate that at minimum `date`, `side`, `quantity`, and `price` are mapped to real column names. If validation fails, throw a descriptive error.
+
+**Cache the detected mapping** to `~/.ai-accountant/exchange-column-maps/[filename-hash].json` so the same exchange format doesn't trigger another API call on the next import.
+
+**Tell the user what was detected:** Log to Telegram (if configured): "Detected new exchange format — mapped [N] columns automatically. Review the first few transactions to confirm they look correct."
 
 Each parser normalises to a common `Trade` interface:
 ```typescript
