@@ -12,7 +12,7 @@ This is a free, open-source system that runs entirely on your own computer. It:
 
 - **Watches a folder** — drop any receipt, invoice, or bank statement in and it reads, categorises, and files it automatically within about 20 seconds
 - **Reads your email** — forward receipts from Amazon, Adobe, AWS, etc. and they're filed without you touching anything
-- **Imports exchange data** — drop a CSV from Binance, Coinbase, Kraken, or 10 other exchanges and it calculates your crypto tax using the correct legal method for your country
+- **Imports exchange data** — drop a CSV from any exchange in the world and it calculates your crypto tax using the correct legal method for your country. Known exchanges are parsed instantly; unknown ones are auto-detected by AI in seconds
 - **Calculates your taxes** — income tax, corporation tax, capital gains, NI contributions, salary/dividend splits, payments on account — whatever applies to your situation
 - **Finds savings you're missing** — pension contributions, home office, mileage, salary/dividend optimisation, CGT allowance usage, R&D credits — specific to your structure and country
 - **Texts you on Telegram** — weekly summaries, deadline alerts at 90/30/7/1 days, and a confirm button when it's time to file
@@ -205,9 +205,9 @@ Pre-built tax adapters for 30+ countries. For any other country, the system gene
 
 **Logging email receipts:** Set up a Gmail filter to forward receipts to your local email address. The system reads it automatically.
 
-**Crypto trading:** Export your trade history from your exchange as a CSV. Drop it in `~/ai-accountant/inbox/exchanges/[exchange-name]/`. CGT is calculated automatically using the correct method for your country.
+**Crypto trading:** Export your trade history from your exchange as a CSV. Drop it in `~/ai-accountant/inbox/exchanges/[exchange-name]/`. CGT is calculated automatically using the correct method for your country. If your exchange isn't one of the built-in ones, the column layout is detected automatically — you'll get a Telegram message showing the first few parsed transactions so you can confirm it looks right.
 
-**Bank statements:** Export a CSV from your bank (Monzo, Starling, Barclays, HSBC, Revolut all work). Drop it in `~/ai-accountant/inbox/bank-statements/`. It matches transactions against your receipts and flags any gaps.
+**Bank statements:** Export a CSV from your bank and drop it in `~/ai-accountant/inbox/bank-statements/`. 10 UK/US/AU banks are supported out of the box. Any other bank is auto-detected the same way. It matches transactions against your receipts and flags any gaps.
 
 **Asking questions:** Open Terminal, navigate to your ai-accountant folder, type `claude` and ask anything:
 - *"what do I owe this year?"*
@@ -253,29 +253,33 @@ It calculates everything and prepares all the data. You still press submit on yo
 
 ## Supported Banks (automatic CSV parsing)
 
-| Bank | Country | Format |
-|------|---------|--------|
-| Monzo | UK | CSV export |
-| Starling | UK | CSV export |
-| Barclays | UK | CSV export |
-| HSBC | UK | CSV export |
-| Revolut | UK / EU | CSV export |
-| Lloyds | UK | CSV export |
-| NatWest / RBS | UK | CSV export |
-| Chase | US | CSV export |
-| Bank of America | US | CSV export |
-| CommBank | AU | CSV export |
-| Generic CSV | Any | Auto-detect columns |
+| Bank | Country | Detection |
+|------|---------|-----------|
+| Monzo | UK | Instant (hardcoded) |
+| Starling | UK | Instant (hardcoded) |
+| Barclays | UK | Instant (hardcoded) |
+| HSBC | UK | Instant (hardcoded) |
+| Revolut | UK / EU | Instant (hardcoded) |
+| Lloyds | UK | Instant (hardcoded) |
+| NatWest / RBS | UK | Instant (hardcoded) |
+| Chase | US | Instant (hardcoded) |
+| Bank of America | US | Instant (hardcoded) |
+| CommBank | AU | Instant (hardcoded) |
+| **Any other bank** | **Any country** | **AI auto-detect** |
 
-Any bank not listed: use the Generic CSV adapter. It auto-detects date, description, and amount columns from the header row.
+**Any bank in the world works.** For banks not in the list above, the system passes your CSV headers and a sample row to Claude, which maps the columns automatically. The detected mapping is cached so repeat imports are instant.
 
 ---
 
 ## Supported Exchanges (automatic CGT calculation)
 
-Binance, Coinbase, Coinbase Pro, Kraken, Revolut Crypto, Gemini, ByBit, OKX, KuCoin, Bitfinex, Huobi, Gate.io
+| Exchange | Detection |
+|----------|-----------|
+| Binance, Coinbase, Coinbase Pro, Kraken | Instant (hardcoded) |
+| Revolut Crypto, Gemini, ByBit, OKX, KuCoin | Instant (hardcoded) |
+| **Any other exchange** | **AI auto-detect** |
 
-Don't see yours? The system can parse any CSV if you tell it which columns contain date, asset, side (buy/sell), quantity, price, and fee.
+**Any exchange in the world works.** Drop any trade history CSV and the system detects which columns are the date, asset, side, quantity, price, and fee — automatically. Works for Gate.io, Huobi, Bitfinex, and any exchange that exports CSVs. The detected mapping is cached so you only pay for one API call per exchange format.
 
 ---
 
@@ -295,8 +299,8 @@ Don't see yours? The system can parse any CSV if you tell it which columns conta
 PRs welcome. Highest-value contributions:
 
 - **Tax adapters** — reviewed JSON for your country. Template: `docs/tax-adapter-template.json`
-- **Bank parsers** — CSV column mappings for your bank. Add to `src/bank-parsers/`
-- **Exchange parsers** — trade history CSV format. Add to `src/exchange-parsers/`
+- **Bank parser fingerprints** — if your bank's CSV is consistently auto-detected, submit the header fingerprint to `src/bank-parsers/index.ts` so it becomes instant (no API call) for everyone
+- **Exchange parser fingerprints** — same deal for exchanges not yet in the hardcoded list
 - **Translations** — setup prompt and output messages in other languages
 
 ---
